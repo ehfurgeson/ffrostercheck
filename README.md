@@ -38,3 +38,9 @@ uv run fantasy-watchdog espn-roster --config config.yaml
 ```
 
 Private leagues use `ESPN_SWID` and `ESPN_S2` from `.env`; credentials are never included in errors or diagnostic output.
+
+To verify every enabled league through the shared platform-neutral model, run:
+
+```bash
+uv run fantasy-watchdog all-rosters --config config.yaml
+```

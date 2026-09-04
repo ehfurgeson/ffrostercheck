@@ -8,6 +8,7 @@ from pathlib import Path
 
 from app.config import ConfigError, load_config, load_environment
 from app.fantasy.espn import ESPNAPIError, ESPNClient, render_espn_roster
+from app.fantasy.manager import FantasyManager, FantasyManagerError, render_all_rosters
 from app.fantasy.sleeper import SleeperAPIError, SleeperClient, render_sleeper_rosters
 
 
@@ -24,6 +25,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     espn.add_argument("--config", type=Path, default=Path("config.yaml"))
     espn.add_argument("--env-file", type=Path, default=Path(".env"))
+    all_rosters = subparsers.add_parser(
+        "all-rosters", description="Print normalized starters and bench players from all platforms"
+    )
+    all_rosters.add_argument("--config", type=Path, default=Path("config.yaml"))
+    all_rosters.add_argument("--env-file", type=Path, default=Path(".env"))
     return parser
 
 
@@ -34,7 +40,9 @@ def main(argv: list[str] | None = None) -> int:
             return _sleeper_rosters(args.config, args.env_file)
         if args.command == "espn-roster":
             return _espn_roster(args.config, args.env_file)
-    except (ConfigError, SleeperAPIError, ESPNAPIError) as exc:
+        if args.command == "all-rosters":
+            return _all_rosters(args.config, args.env_file)
+    except (ConfigError, SleeperAPIError, ESPNAPIError, FantasyManagerError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     return 2
@@ -77,4 +85,17 @@ def _espn_roster(config_path: Path, env_file: Path) -> int:
             nickname=nickname,
         )
     print(render_espn_roster(roster))
+    return 0
+
+
+def _all_rosters(config_path: Path, env_file: Path) -> int:
+    config = load_config(config_path)
+    environment = load_environment(env_file=env_file)
+    with (
+        SleeperClient() as sleeper,
+        ESPNClient(swid=environment.espn_swid, espn_s2=environment.espn_s2) as espn,
+    ):
+        manager = FantasyManager(sleeper=sleeper, espn=espn)
+        rosters = manager.get_all_rosters(config, environment)
+    print(render_all_rosters(rosters))
     return 0

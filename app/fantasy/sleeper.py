@@ -35,6 +35,7 @@ class SleeperPlayer:
     name: str
     nfl_team: str | None
     position: str | None
+    eligible_positions: tuple[str, ...]
     lineup_slot: str
     is_starter: bool
     is_reserve: bool = False
@@ -252,11 +253,18 @@ class SleeperClient:
         name = record.get("full_name") or " ".join(
             part for part in (record.get("first_name"), record.get("last_name")) if part
         )
+        raw_eligible_positions = record.get("fantasy_positions")
+        if isinstance(raw_eligible_positions, list):
+            eligible_positions = tuple(str(position) for position in raw_eligible_positions)
+        else:
+            position = _optional_text(record.get("position"))
+            eligible_positions = (position,) if position else ()
         return SleeperPlayer(
             player_id=player_id,
             name=str(name or player_id),
             nfl_team=_optional_text(record.get("team")),
             position=_optional_text(record.get("position")),
+            eligible_positions=eligible_positions,
             lineup_slot=lineup_slot,
             is_starter=is_starter,
             is_reserve=player_id in reserve_ids,
