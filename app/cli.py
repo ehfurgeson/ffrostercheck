@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from app.config import ConfigError, load_config, load_environment
+from app.fantasy.espn import ESPNAPIError, ESPNClient, render_espn_roster
 from app.fantasy.sleeper import SleeperAPIError, SleeperClient, render_sleeper_rosters
 
 
@@ -18,6 +19,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sleeper.add_argument("--config", type=Path, default=Path("config.yaml"))
     sleeper.add_argument("--env-file", type=Path, default=Path(".env"))
+    espn = subparsers.add_parser(
+        "espn-roster", description="Print the interpreted ESPN starters and bench players"
+    )
+    espn.add_argument("--config", type=Path, default=Path("config.yaml"))
+    espn.add_argument("--env-file", type=Path, default=Path(".env"))
     return parser
 
 
@@ -26,7 +32,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "sleeper-rosters":
             return _sleeper_rosters(args.config, args.env_file)
-    except (ConfigError, SleeperAPIError) as exc:
+        if args.command == "espn-roster":
+            return _espn_roster(args.config, args.env_file)
+    except (ConfigError, SleeperAPIError, ESPNAPIError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     return 2
@@ -46,4 +54,27 @@ def _sleeper_rosters(config_path: Path, env_file: Path) -> int:
             configured_leagues=config.sleeper.leagues,
         )
     print(render_sleeper_rosters(rosters))
+    return 0
+
+
+def _espn_roster(config_path: Path, env_file: Path) -> int:
+    config = load_config(config_path)
+    environment = load_environment(env_file=env_file)
+    configured = config.espn.leagues[0] if config.espn.leagues else None
+    league_id = environment.espn_league_id or (configured.id if configured else None)
+    if not league_id or league_id.startswith("REPLACE_WITH_"):
+        raise ConfigError("Set ESPN_LEAGUE_ID or configure an ESPN league in YAML")
+
+    team_id = configured.team_id if configured else None
+    if team_id and team_id.startswith("REPLACE_WITH_"):
+        team_id = None
+    nickname = configured.nickname if configured else "ESPN"
+    with ESPNClient(swid=environment.espn_swid, espn_s2=environment.espn_s2) as client:
+        roster = client.load_roster(
+            season=config.season,
+            league_id=league_id,
+            team_id=team_id,
+            nickname=nickname,
+        )
+    print(render_espn_roster(roster))
     return 0

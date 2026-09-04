@@ -1,0 +1,98 @@
+{
+  "id": 987,
+  "settings": {
+    "name": "Fixture League",
+    "rosterSettings": {
+      "lineupSlotCounts": {"0": 1, "2": 1, "20": 2, "21": 1}
+    },
+    "scoringSettings": {
+      "scoringItems": [{"statId": 53, "points": 1.0}]
+    }
+  },
+  "members": [
+    {"id": "{OWNER-GUID}", "displayName": "Watchdog Owner"},
+    {"id": "{OTHER-GUID}", "displayName": "Other Owner"}
+  ],
+  "teams": [
+    {
+      "id": 1,
+      "location": "Watchdog",
+      "nickname": "Team",
+      "primaryOwner": "{OWNER-GUID}",
+      "owners": ["{OWNER-GUID}"],
+      "roster": {
+        "entries": [
+          {
+            "lineupSlotId": 0,
+            "playerId": 101,
+            "injuryStatus": "NORMAL",
+            "playerPoolEntry": {
+              "player": {
+                "id": 101,
+                "fullName": "Starting Quarterback",
+                "proTeamId": 2,
+                "defaultPositionId": 1,
+                "eligibleSlots": [0, 7, 20],
+                "injured": false,
+                "injuryStatus": "QUESTIONABLE"
+              }
+            }
+          },
+          {
+            "lineupSlotId": 20,
+            "playerId": 102,
+            "playerPoolEntry": {
+              "player": {
+                "id": 102,
+                "fullName": "Bench Runner",
+                "proTeamId": 9,
+                "defaultPositionId": 2,
+                "eligibleSlots": [2, 23, 20],
+                "injuryStatus": "ACTIVE"
+              }
+            }
+          },
+          {
+            "lineupSlotId": 21,
+            "playerId": 103,
+            "playerPoolEntry": {
+              "player": {
+                "id": 103,
+                "fullName": "Reserve Receiver",
+                "proTeamId": 4,
+                "defaultPositionId": 3,
+                "eligibleSlots": [4, 23, 20, 21],
+                "injuryStatus": "INJURY_RESERVE"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "location": "Other",
+      "nickname": "Team",
+      "primaryOwner": "{OTHER-GUID}",
+      "owners": ["{OTHER-GUID}"],
+      "roster": {
+        "entries": [
+          {
+            "lineupSlotId": 0,
+            "playerId": 201,
+            "playerPoolEntry": {
+              "player": {
+                "id": 201,
+                "fullName": "Other Quarterback",
+                "proTeamId": 12,
+                "defaultPositionId": 1,
+                "eligibleSlots": [0, 7, 20],
+                "injuryStatus": "ACTIVE"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

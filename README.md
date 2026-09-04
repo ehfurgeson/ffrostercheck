@@ -30,3 +30,11 @@ uv run fantasy-watchdog sleeper-rosters --config config.yaml
 ```
 
 The command discovers the configured leagues, prints starters and bench players, and annotates reserve and taxi players without treating nominal roster-slot counts as actual membership.
+
+The matching ESPN diagnostic supports both public and private leagues:
+
+```bash
+uv run fantasy-watchdog espn-roster --config config.yaml
+```
+
+Private leagues use `ESPN_SWID` and `ESPN_S2` from `.env`; credentials are never included in errors or diagnostic output.
