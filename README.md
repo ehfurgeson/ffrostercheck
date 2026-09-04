@@ -2,7 +2,6 @@
 
 Fantasy Watchdog is a Python service that will check fantasy-football lineups shortly before NFL kickoff and email one consolidated availability report across Sleeper and ESPN leagues.
 
-The implementation is being built in small, independently working milestones; see [`fantasy_watchdog_build_spec.md`](fantasy_watchdog_build_spec.md) for the full design.
 
 ## Requirements
 
