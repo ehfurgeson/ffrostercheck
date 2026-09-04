@@ -1,0 +1,9 @@
+[
+  {
+    "roster_id": 3,
+    "owner_id": "primary-owner",
+    "co_owners": ["user-1"],
+    "players": ["p7", "p8", "p9"],
+    "starters": ["p7", "p8"]
+  }
+]

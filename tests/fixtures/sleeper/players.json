@@ -1,0 +1,11 @@
+{
+  "p1": {"full_name": "Quarter Back", "team": "BUF", "position": "QB"},
+  "p2": {"full_name": "Wide Receiver", "team": "CIN", "position": "WR"},
+  "p3": {"full_name": "Flex Player", "team": "GB", "position": "RB"},
+  "p4": {"full_name": "Bench Player", "team": "DEN", "position": "WR"},
+  "p5": {"full_name": "Reserve Player", "team": "DAL", "position": "RB"},
+  "p6": {"full_name": "Taxi Player", "team": "CHI", "position": "TE"},
+  "p7": {"full_name": "Second Quarterback", "team": "KC", "position": "QB"},
+  "p8": {"full_name": "Second Runner", "team": "NYJ", "position": "RB"},
+  "p9": {"full_name": "Extra Member", "team": "NE", "position": "WR"}
+}

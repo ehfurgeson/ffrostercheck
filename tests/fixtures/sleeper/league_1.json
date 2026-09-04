@@ -1,0 +1,6 @@
+{
+  "league_id": "league-1",
+  "name": "First League",
+  "roster_positions": ["QB", "RB", "WR", "FLEX", "BN", "IR"],
+  "scoring_settings": {"rec": 1.0}
+}

@@ -1,0 +1,16 @@
+[
+  {
+    "roster_id": 8,
+    "owner_id": "user-1",
+    "players": ["p1", "p2", "p3", "p4", "p5", "p6"],
+    "starters": ["p1", "0", "p2", "p3"],
+    "reserve": ["p5"],
+    "taxi": ["p6"]
+  },
+  {
+    "roster_id": 9,
+    "owner_id": "someone-else",
+    "players": ["p7"],
+    "starters": ["p7"]
+  }
+]

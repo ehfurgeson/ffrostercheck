@@ -1,0 +1,6 @@
+{
+  "league_id": "league-2",
+  "name": "Co-owned League",
+  "roster_positions": ["QB", "RB", "BN"],
+  "scoring_settings": {"rec": 0.5}
+}

@@ -23,4 +23,10 @@ uv run pytest
 
 ## Current milestone
 
-The project currently provides typed YAML configuration, strict validation, and secret-safe environment loading. Fantasy platform ingestion is the next milestone.
+The project currently provides typed configuration plus Sleeper league and roster ingestion. Run the Sleeper diagnostic after creating local configuration:
+
+```bash
+uv run fantasy-watchdog sleeper-rosters --config config.yaml
+```
+
+The command discovers the configured leagues, prints starters and bench players, and annotates reserve and taxi players without treating nominal roster-slot counts as actual membership.

@@ -100,7 +100,9 @@ class AppConfig:
 
 
 @dataclass(frozen=True, repr=False)
-class SecretConfig:
+class EnvironmentConfig:
+    sleeper_user: str | None = None
+    espn_league_id: str | None = None
     espn_swid: str | None = field(default=None, repr=False)
     espn_s2: str | None = field(default=None, repr=False)
     smtp_user: str | None = field(default=None, repr=False)
@@ -117,7 +119,16 @@ class SecretConfig:
             )
             if value
         ]
-        return f"SecretConfig(configured={configured!r})"
+        return (
+            "EnvironmentConfig("
+            f"sleeper_user={self.sleeper_user!r}, "
+            f"espn_league_id={self.espn_league_id!r}, "
+            f"configured_secrets={configured!r})"
+        )
+
+    def require_sleeper(self) -> None:
+        if not self.sleeper_user:
+            raise ConfigError("Missing Sleeper setting: SLEEPER_USER")
 
     def require_espn(self) -> None:
         _require_secrets(self, ("espn_swid", "espn_s2"), "ESPN")
@@ -177,12 +188,12 @@ def load_config(path: str | Path) -> AppConfig:
     )
 
 
-def load_secrets(
+def load_environment(
     *,
     env_file: str | Path | None = ".env",
     environ: Mapping[str, str] | None = None,
-) -> SecretConfig:
-    """Load secrets from a dotenv file, overridden by the supplied environment."""
+) -> EnvironmentConfig:
+    """Load runtime values from a dotenv file, overridden by the environment."""
 
     values: dict[str, str | None] = {}
     if env_file is not None:
@@ -194,7 +205,9 @@ def load_secrets(
         environ = os.environ
     values.update(environ)
 
-    return SecretConfig(
+    return EnvironmentConfig(
+        sleeper_user=_optional_secret(values.get("SLEEPER_USER")),
+        espn_league_id=_optional_secret(values.get("ESPN_LEAGUE_ID")),
         espn_swid=_optional_secret(values.get("ESPN_SWID")),
         espn_s2=_optional_secret(values.get("ESPN_S2")),
         smtp_user=_optional_secret(values.get("SMTP_USER")),
@@ -424,7 +437,7 @@ def _optional_secret(value: str | None) -> str | None:
     return value.strip()
 
 
-def _require_secrets(config: SecretConfig, names: tuple[str, ...], label: str) -> None:
+def _require_secrets(config: EnvironmentConfig, names: tuple[str, ...], label: str) -> None:
     environment_names = {
         "espn_swid": "ESPN_SWID",
         "espn_s2": "ESPN_S2",
@@ -434,3 +447,8 @@ def _require_secrets(config: SecretConfig, names: tuple[str, ...], label: str) -
     missing = [environment_names[name] for name in names if not getattr(config, name)]
     if missing:
         raise ConfigError(f"Missing {label} secret(s): {', '.join(missing)}")
+
+
+# Backward-compatible names from the first project milestone.
+SecretConfig = EnvironmentConfig
+load_secrets = load_environment

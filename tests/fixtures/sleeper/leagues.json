@@ -1,0 +1,12 @@
+[
+  {
+    "league_id": "league-1",
+    "name": "First League",
+    "season": "2026"
+  },
+  {
+    "league_id": "league-2",
+    "name": "Co-owned League",
+    "season": "2026"
+  }
+]
