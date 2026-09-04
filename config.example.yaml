@@ -1,0 +1,48 @@
+season: 2026
+timezone: America/New_York
+
+alerts:
+  prefetch_attempts_minutes_before_kickoff: [95, 75, 15]
+  email_minutes_before_kickoff: 5
+
+sleeper:
+  username: worldwideworm
+  user_id: "1024779386450538496"
+  leagues:
+    - id: "1389694250752425984"
+      roster_id: "8"
+      nickname: CFL
+    - id: "1389362487303892992"
+      roster_id: "11"
+      nickname: No More Fields
+    - id: "1359974214391582720"
+      roster_id: "7"
+      nickname: Cry Dynasty
+
+espn:
+  leagues:
+    - id: "REPLACE_WITH_ESPN_LEAGUE_ID"
+      team_id: "REPLACE_WITH_ESPN_TEAM_ID"
+      nickname: Main
+
+email:
+  smtp_host: smtp.gmail.com
+  smtp_port: 587
+  recipient: REPLACE_WITH_YOUR_EMAIL
+
+watch:
+  starters: true
+  bench_for_replacements: true
+  include_bench_injury_notes: true
+  depth_opportunity: true
+  broad_position_opportunity: true
+
+depth_chart:
+  enabled: true
+  max_age_hours: 30
+  strong_boost_only_for_same_slot_promotion: true
+
+sources:
+  official_team_context_required: false
+  record_http_cache_age: true
+  final_sleeper_cache_bust: false
