@@ -54,6 +54,7 @@ def _result(
     position: str | None = "S",
     game_day_state: GameDayState | None = None,
     injury_designation: InjuryDesignation | None = None,
+    roster_eligibility: RosterEligibility | None = None,
     detail: str | None = None,
 ) -> SourceResult:
     return SourceResult(
@@ -62,6 +63,7 @@ def _result(
         success=report_state is not ReportState.FAILED,
         report_state=report_state,
         retrieved_at=NOW,
+        roster_eligibility=roster_eligibility,
         game_day_state=game_day_state,
         injury_designation=injury_designation,
         detail=detail,
@@ -429,6 +431,159 @@ def test_week18_fixtures_combine_without_inferring_active_from_a_partial_injury_
     rendered = render_player_statuses(statuses, (inactives, injuries))
     assert "nfl_inactives partial" in rendered
     assert "designation=out" in rendered
+
+
+def test_sleeper_catalog_active_does_not_set_game_day_active() -> None:
+    statuses = combine_official_statuses(
+        (_subject(name="Trevor Lawrence", team="JAX", position="QB"),),
+        (
+            _report(
+                "sleeper_status",
+                ReportState.COMPLETE,
+                _result(
+                    source="sleeper_status",
+                    name="Trevor Lawrence",
+                    team="JAX",
+                    position="QB",
+                    roster_eligibility=RosterEligibility.ELIGIBLE,
+                    injury_designation=InjuryDesignation.NONE,
+                    detail="catalog_active=true; catalog_active_is_not_game_day_active",
+                ),
+                expected_teams=frozenset({"TEN", "JAX"}),
+            ),
+        ),
+        decision_at=NOW,
+    )
+
+    status = statuses[0]
+    assert status.game_day_state is GameDayState.UNKNOWN
+    assert status.injury_designation is InjuryDesignation.NONE
+    assert status.confidence is Confidence.MEDIUM
+    assert status.official_inactive is None
+
+
+def test_official_inactive_wins_over_sleeper_questionable() -> None:
+    statuses = combine_official_statuses(
+        (_subject(eligibility=RosterEligibility.ELIGIBLE),),
+        (
+            _report(
+                "nfl_inactives",
+                ReportState.COMPLETE,
+                _result(source="nfl_inactives", game_day_state=GameDayState.INACTIVE),
+            ),
+            _report(
+                "sleeper_status",
+                ReportState.COMPLETE,
+                _result(
+                    source="sleeper_status",
+                    injury_designation=InjuryDesignation.QUESTIONABLE,
+                    detail="injury_status=Questionable",
+                ),
+            ),
+        ),
+        decision_at=NOW,
+    )
+
+    status = statuses[0]
+    assert status.game_day_state is GameDayState.INACTIVE
+    assert status.official_inactive is True
+    assert status.injury_designation is InjuryDesignation.QUESTIONABLE
+    assert status.confidence is Confidence.OFFICIAL
+    assert [result.source for result in status.source_results] == [
+        "nfl_inactives",
+        "sleeper_status",
+    ]
+
+
+def test_complete_official_injury_report_keeps_control_over_sleeper() -> None:
+    statuses = combine_official_statuses(
+        (_subject(name="Trevor Lawrence", team="JAX", position="QB"),),
+        (
+            _report(
+                "nfl_injuries",
+                ReportState.COMPLETE,
+                expected_teams=frozenset({"TEN", "JAX"}),
+            ),
+            _report(
+                "sleeper_status",
+                ReportState.COMPLETE,
+                _result(
+                    source="sleeper_status",
+                    name="Trevor Lawrence",
+                    team="JAX",
+                    position="QB",
+                    injury_designation=InjuryDesignation.QUESTIONABLE,
+                    detail="injury_status=Questionable",
+                ),
+                expected_teams=frozenset({"TEN", "JAX"}),
+            ),
+        ),
+        decision_at=NOW,
+    )
+
+    status = statuses[0]
+    assert status.injury_designation is InjuryDesignation.NONE
+    assert status.confidence is Confidence.OFFICIAL
+    assert any(
+        result.source == "sleeper_status"
+        and result.injury_designation is InjuryDesignation.QUESTIONABLE
+        for result in status.source_results
+    )
+
+
+def test_sleeper_fills_designation_when_official_injury_report_is_unpublished() -> None:
+    statuses = combine_official_statuses(
+        (_subject(),),
+        (
+            _report("nfl_injuries", ReportState.NOT_YET_PUBLISHED),
+            _report(
+                "sleeper_status",
+                ReportState.COMPLETE,
+                _result(
+                    source="sleeper_status",
+                    injury_designation=InjuryDesignation.QUESTIONABLE,
+                    detail="injury_status=Questionable",
+                ),
+            ),
+        ),
+        decision_at=NOW,
+    )
+
+    status = statuses[0]
+    assert status.game_day_state is GameDayState.UNKNOWN
+    assert status.injury_designation is InjuryDesignation.QUESTIONABLE
+    assert status.confidence is Confidence.MEDIUM
+
+
+def test_sleeper_ir_blocks_active_inference_from_complete_inactives() -> None:
+    statuses = combine_official_statuses(
+        (_subject(name="Injured Reserve", team="TEN", position="WR"),),
+        (
+            _report("nfl_inactives", ReportState.COMPLETE),
+            _report(
+                "sleeper_status",
+                ReportState.COMPLETE,
+                _result(
+                    source="sleeper_status",
+                    name="Injured Reserve",
+                    team="TEN",
+                    position="WR",
+                    roster_eligibility=RosterEligibility.INELIGIBLE,
+                    injury_designation=InjuryDesignation.OUT,
+                    detail="injury_status=IR",
+                ),
+                expected_teams=frozenset({"TEN", "JAX"}),
+            ),
+        ),
+        decision_at=NOW,
+    )
+
+    status = statuses[0]
+    assert status.roster_eligibility is RosterEligibility.INELIGIBLE
+    assert status.game_day_state is GameDayState.UNKNOWN
+    assert status.official_inactive is False
+    assert status.injury_designation is InjuryDesignation.OUT
+    assert status.confidence is Confidence.MEDIUM
 
 
 def _fantasy_player(

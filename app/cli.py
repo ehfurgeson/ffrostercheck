@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +25,7 @@ from app.nfl import (
     NFLVerseLoadError,
     NFLVerseSource,
     PlayerIdentityResolver,
+    SleeperStatusSource,
     assign_next_games,
     group_kickoff_windows,
     map_rosters_to_nfl,
@@ -35,6 +37,7 @@ from app.nfl import (
     render_kickoff_windows,
     render_next_games,
     render_roster_mapping,
+    render_sleeper_status_report,
 )
 from app.storage.cache import (
     StatusCache,
@@ -109,6 +112,11 @@ def build_parser() -> argparse.ArgumentParser:
     player_status.add_argument("--game-id", default="manual")
     player_status.add_argument("--inactives-html", type=Path, help="Offline inactives article fixture")
     player_status.add_argument("--injuries-html", type=Path, help="Offline injury-report fixture")
+    player_status.add_argument(
+        "--sleeper-players",
+        type=Path,
+        help="Optional offline Sleeper player-catalog fixture used as a lower-confidence fallback",
+    )
     player_status.add_argument("--config", type=Path, help="Optional YAML config to include owned players")
     player_status.add_argument("--env-file", type=Path, default=Path(".env"))
     status_cache = subparsers.add_parser(
@@ -130,6 +138,18 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("prefetch", "final"),
         required=True,
         help="prefetch stores a T-90 snapshot; final attempts a refresh before using cache",
+    )
+    sleeper_status = subparsers.add_parser(
+        "sleeper-status",
+        description="Normalize Sleeper catalog injury/status fields without treating active as game-day active",
+    )
+    sleeper_status.add_argument("--home", required=True, help="Home team abbreviation")
+    sleeper_status.add_argument("--away", required=True, help="Away team abbreviation")
+    sleeper_status.add_argument("--game-id", default="manual")
+    sleeper_status.add_argument(
+        "--players",
+        type=Path,
+        help="Offline Sleeper player-catalog JSON fixture",
     )
     return parser
 
@@ -157,6 +177,8 @@ def main(argv: list[str] | None = None) -> int:
             return _player_status(args)
         if args.command == "status-cache":
             return _status_cache(args)
+        if args.command == "sleeper-status":
+            return _sleeper_status(args)
     except (
         ConfigError,
         SleeperAPIError,
@@ -334,6 +356,22 @@ def _nfl_injuries(args: argparse.Namespace) -> int:
         return 0 if source.load_document().report_state is not ReportState.FAILED else 1
 
 
+def _sleeper_status(args: argparse.Namespace) -> int:
+    catalog = _load_sleeper_catalog(args.players) if args.players else None
+    with SleeperStatusSource(catalog=catalog) as source:
+        report = source.fetch_game(
+            RelevantGame(
+                game_id=args.game_id,
+                home_team=args.home,
+                away_team=args.away,
+                kickoff=datetime.now(timezone.utc),
+                fantasy_players=(),
+            )
+        )
+    print(render_sleeper_status_report(report))
+    return 0 if report.report_state is not ReportState.FAILED else 1
+
+
 def _player_status(args: argparse.Namespace) -> int:
     reports, subjects = _official_status_inputs(args)
     print(
@@ -405,10 +443,22 @@ def _official_reports(args: argparse.Namespace):
             html=injuries_html,
         ) as injuries,
     ):
-        return (
+        reports = [
             inactives.fetch_game(game),
             injuries.fetch_game(game, validate_date=False),
-        )
+        ]
+    sleeper_players = getattr(args, "sleeper_players", None)
+    if sleeper_players is not None:
+        with SleeperStatusSource(catalog=_load_sleeper_catalog(sleeper_players)) as sleeper:
+            reports.append(sleeper.fetch_game(game))
+    return tuple(reports)
+
+
+def _load_sleeper_catalog(path: Path) -> dict:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or not all(isinstance(value, dict) for value in payload.values()):
+        raise ConfigError(f"Sleeper player catalog fixture is invalid: {path}")
+    return payload
 
 
 def _configured_status_subjects(args: argparse.Namespace):
