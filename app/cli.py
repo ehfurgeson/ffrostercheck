@@ -36,6 +36,12 @@ from app.nfl import (
     render_next_games,
     render_roster_mapping,
 )
+from app.storage.cache import (
+    StatusCache,
+    StatusCacheError,
+    render_cached_snapshot,
+    render_status_resolution,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -105,6 +111,26 @@ def build_parser() -> argparse.ArgumentParser:
     player_status.add_argument("--injuries-html", type=Path, help="Offline injury-report fixture")
     player_status.add_argument("--config", type=Path, help="Optional YAML config to include owned players")
     player_status.add_argument("--env-file", type=Path, default=Path(".env"))
+    status_cache = subparsers.add_parser(
+        "status-cache",
+        description="Save T-90 official statuses or refresh them at T-5 without treating cache as origin-fresh",
+    )
+    status_cache.add_argument("--home", required=True, help="Home team abbreviation")
+    status_cache.add_argument("--away", required=True, help="Away team abbreviation")
+    status_cache.add_argument("--season", type=int, required=True)
+    status_cache.add_argument("--week", type=int, required=True)
+    status_cache.add_argument("--game-id", default="manual")
+    status_cache.add_argument("--inactives-html", type=Path, help="Offline inactives article fixture")
+    status_cache.add_argument("--injuries-html", type=Path, help="Offline injury-report fixture")
+    status_cache.add_argument("--config", type=Path, help="Optional YAML config to include owned players")
+    status_cache.add_argument("--env-file", type=Path, default=Path(".env"))
+    status_cache.add_argument("--cache-dir", type=Path, default=Path("cache"))
+    status_cache.add_argument(
+        "--stage",
+        choices=("prefetch", "final"),
+        required=True,
+        help="prefetch stores a T-90 snapshot; final attempts a refresh before using cache",
+    )
     return parser
 
 
@@ -129,12 +155,15 @@ def main(argv: list[str] | None = None) -> int:
             return _nfl_injuries(args)
         if args.command == "player-status":
             return _player_status(args)
+        if args.command == "status-cache":
+            return _status_cache(args)
     except (
         ConfigError,
         SleeperAPIError,
         ESPNAPIError,
         FantasyManagerError,
         NFLVerseLoadError,
+        StatusCacheError,
     ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -306,6 +335,55 @@ def _nfl_injuries(args: argparse.Namespace) -> int:
 
 
 def _player_status(args: argparse.Namespace) -> int:
+    reports, subjects = _official_status_inputs(args)
+    print(
+        render_player_statuses(
+            combine_official_statuses(
+                subjects,
+                reports,
+                decision_at=datetime.now(timezone.utc),
+            ),
+            reports,
+        )
+    )
+    return 0 if all(report.report_state is not ReportState.FAILED for report in reports) else 1
+
+
+def _status_cache(args: argparse.Namespace) -> int:
+    cache = StatusCache(args.cache_dir)
+    if args.stage == "prefetch":
+        reports, subjects = _official_status_inputs(args)
+        decision_at = datetime.now(timezone.utc)
+        statuses = combine_official_statuses(subjects, reports, decision_at=decision_at)
+        snapshot = cache.save_prefetch(
+            game_id=args.game_id,
+            reports=reports,
+            statuses=statuses,
+            cached_at=decision_at,
+        )
+        print(render_cached_snapshot(snapshot))
+        print(render_player_statuses(snapshot.statuses, snapshot.reports))
+        return 0 if all(report.report_state is not ReportState.FAILED for report in reports) else 1
+
+    resolution = cache.resolve_final(
+        game_id=args.game_id,
+        fetch_reports=lambda: _official_reports(args),
+        subjects=_configured_status_subjects(args),
+        decision_at=datetime.now(timezone.utc),
+    )
+    print(render_status_resolution(resolution))
+    print(render_player_statuses(resolution.statuses, resolution.reports))
+    if resolution.origin_fresh:
+        return 0 if all(report.report_state is not ReportState.FAILED for report in resolution.reports) else 1
+    return 0
+
+
+def _official_status_inputs(args: argparse.Namespace):
+    reports = _official_reports(args)
+    return reports, _status_subjects(args, reports)
+
+
+def _official_reports(args: argparse.Namespace):
     game = RelevantGame(
         game_id=args.game_id,
         home_team=args.home,
@@ -327,11 +405,19 @@ def _player_status(args: argparse.Namespace) -> int:
             html=injuries_html,
         ) as injuries,
     ):
-        reports = (
+        return (
             inactives.fetch_game(game),
             injuries.fetch_game(game, validate_date=False),
         )
-    subjects = subjects_from_source_reports(reports)
+
+
+def _configured_status_subjects(args: argparse.Namespace):
+    if not args.config:
+        return ()
+    return _status_subjects(args, ())
+
+
+def _status_subjects(args: argparse.Namespace, reports):
     if args.config:
         mapping, _snapshot = _mapped_rosters(args.config, args.env_file)
         teams = {args.home.upper(), args.away.upper()}
@@ -341,15 +427,5 @@ def _player_status(args: argparse.Namespace) -> int:
             for player in roster.players
             if player.nfl_team in teams
         )
-        subjects = subjects_from_fantasy_players(owned)
-    print(
-        render_player_statuses(
-            combine_official_statuses(
-                subjects,
-                reports,
-                decision_at=datetime.now(timezone.utc),
-            ),
-            reports,
-        )
-    )
-    return 0 if all(report.report_state is not ReportState.FAILED for report in reports) else 1
+        return subjects_from_fantasy_players(owned)
+    return subjects_from_source_reports(reports)
