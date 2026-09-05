@@ -31,6 +31,7 @@ from app.nfl import (
     SleeperStatusSource,
     assign_next_games,
     group_kickoff_windows,
+    join_owned_skill_players,
     map_rosters_to_nfl,
     parse_nfl_schedule,
     load_latest_depth_snapshot,
@@ -42,6 +43,7 @@ from app.nfl import (
     render_kickoff_windows,
     render_next_games,
     render_nflverse_status_report,
+    render_owned_depth_join,
     render_roster_mapping,
     render_sleeper_status_report,
     render_team_status_report,
@@ -231,6 +233,26 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Offline nflverse depth-chart JSON fixture",
     )
+    owned_depth = subparsers.add_parser(
+        "owned-depth",
+        description="Join owned QB/RB/WR/TE players to a depth snapshot by GSIS or ESPN ID",
+    )
+    owned_depth.add_argument("--config", type=Path, default=Path("config.yaml"))
+    owned_depth.add_argument("--env-file", type=Path, default=Path(".env"))
+    owned_depth.add_argument(
+        "--as-of",
+        help="Timezone-aware ISO decision time; defaults to now in UTC",
+    )
+    owned_depth.add_argument(
+        "--max-age-hours",
+        type=int,
+        help="Stale-snapshot limit in hours; defaults to YAML depth_chart.max_age_hours",
+    )
+    owned_depth.add_argument(
+        "--charts",
+        type=Path,
+        help="Offline nflverse depth-chart JSON fixture",
+    )
     return parser
 
 
@@ -265,6 +287,8 @@ def main(argv: list[str] | None = None) -> int:
             return _team_status(args)
         if args.command == "depth-charts":
             return _depth_charts(args)
+        if args.command == "owned-depth":
+            return _owned_depth(args)
     except (
         ConfigError,
         SleeperAPIError,
@@ -373,6 +397,11 @@ def _mapped_rosters(config_path: Path, env_file: Path):
             config, environment
         )
     snapshot = NFLVerseSource().load_snapshot(config.season)
+    resolver = _identity_resolver(snapshot)
+    return map_rosters_to_nfl(rosters, resolver), snapshot
+
+
+def _identity_resolver(snapshot):
     required = {
         "players": snapshot.players.frame,
         "rosters": snapshot.rosters.frame,
@@ -383,12 +412,11 @@ def _mapped_rosters(config_path: Path, env_file: Path):
         raise NFLVerseLoadError(
             "Cannot resolve fantasy rosters; unavailable nflverse data: " + ", ".join(missing)
         )
-    resolver = PlayerIdentityResolver.from_nflverse(
+    return PlayerIdentityResolver.from_nflverse(
         fantasy_player_ids=required["fantasy player IDs"],
         players=required["players"],
         rosters=required["rosters"],
     )
-    return map_rosters_to_nfl(rosters, resolver), snapshot
 
 
 def _nfl_inactives(args: argparse.Namespace) -> int:
@@ -485,6 +513,39 @@ def _depth_charts(args: argparse.Namespace) -> int:
     )
     print(render_depth_snapshot(snapshot))
     return 0
+
+
+def _owned_depth(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    mapping, core_snapshot = _mapped_rosters(args.config, args.env_file)
+    rows = _load_depth_chart_rows(args.charts) if args.charts else None
+    max_age_hours = (
+        args.max_age_hours
+        if args.max_age_hours is not None
+        else config.depth_chart.max_age_hours
+    )
+    if max_age_hours <= 0:
+        raise ConfigError("max_age_hours must be greater than 0")
+    depth_snapshot = load_latest_depth_snapshot(
+        config.season,
+        as_of=_parse_as_of(args.as_of),
+        max_age_hours=max_age_hours,
+        rows=rows,
+    )
+    resolver = _identity_resolver(core_snapshot)
+    players = tuple(player for roster in mapping.rosters for player in roster.players)
+    result = join_owned_skill_players(
+        players,
+        depth_snapshot,
+        identities=resolver.identities,
+    )
+    print(render_depth_snapshot(depth_snapshot))
+    print(render_owned_depth_join(result))
+    data_errors = {
+        "not_in_snapshot",
+        "ambiguous_depth_id",
+    }
+    return 1 if any(issue.state.value in data_errors for issue in result.issues) else 0
 
 
 def _depth_chart_settings(args: argparse.Namespace) -> tuple[int, int]:

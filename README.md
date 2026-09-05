@@ -22,7 +22,7 @@ uv run pytest
 
 ## Current milestone
 
-The project currently loads Sleeper and ESPN rosters, resolves canonical NFL identities, groups players by exact kickoff, parses official NFL.com inactives and injury reports, combines those sources into one status per player, caches T−90 official snapshots, and uses Sleeper catalog fields plus nflverse injuries as fallbacks. Optional official team-site articles can attach attributed notes, but they never override official inactives or become binary game-day status. Confidence is scored from the strongest informing source rather than averaged: official evidence is `official`, cached official evidence after a failed refresh is `high`, Sleeper is `medium`, and nflverse is `low`. Sleeper catalog `active` and nflverse injury rows never become game-day active, and unavailable nflverse injury seasons fail at the source instead of crashing the app.
+The project currently loads Sleeper and ESPN rosters, resolves canonical NFL identities, groups players by exact kickoff, parses official NFL.com inactives and injury reports, combines those sources into one status per player, caches T−90 official snapshots, and uses Sleeper catalog fields plus nflverse injuries as fallbacks. It selects one timestamped depth snapshot and joins deduplicated owned QB/RB/WR/TE players by exact GSIS ID, then known ESPN ID, without name guessing. Optional official team-site articles can attach attributed notes, but they never override official inactives or become binary game-day status. Confidence is scored from the strongest informing source rather than averaged: official evidence is `official`, cached official evidence after a failed refresh is `high`, Sleeper is `medium`, and nflverse is `low`. Sleeper catalog `active` and nflverse injury rows never become game-day active, and unavailable nflverse injury seasons fail at the source instead of crashing the app.
 
 ```bash
 uv run fantasy-watchdog sleeper-rosters --config config.yaml
@@ -35,6 +35,8 @@ uv run fantasy-watchdog status-cache --stage prefetch --season 2025 --week 18 --
 uv run fantasy-watchdog sleeper-status --home JAX --away TEN --players tests/fixtures/sleeper/status_players.json
 uv run fantasy-watchdog nflverse-status --season 2025 --week 18 --home JAX --away TEN --injuries tests/fixtures/nflverse/injuries.json
 uv run fantasy-watchdog team-status --home CHI --away GB --article GB=tests/fixtures/team_sites/packers_lists.html
+uv run fantasy-watchdog depth-charts --season 2026 --charts tests/fixtures/depth_charts/snapshots.json --as-of 2026-09-04T18:00:00Z
+uv run fantasy-watchdog owned-depth --config config.yaml
 ```
 
 Private ESPN leagues use `ESPN_SWID` and `ESPN_S2` from `.env`; credentials are never included in errors or diagnostic output. Official NFL.com diagnostics stay fixture-driven and never infer active or healthy from missing rows. Official team-site context is optional, non-blocking, and attributed only: Packers list adapters may name players, while Chiefs/Patriots/generic narrative is preserved as excerpt text and never converted into active/inactive/out. Sleeper catalog `active` is recorded as employment metadata only and is not a game-day active declaration. nflverse injuries are corroboration only; a missing or unsupported season is a source failure, not a healthy league. Confidence follows the strongest informing source and is reduced when cached official evidence is reused after a failed refresh.
