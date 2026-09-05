@@ -209,7 +209,7 @@ def test_failed_final_refresh_uses_cache_without_calling_it_origin_fresh(tmp_pat
     assert report.published_at == datetime(2026, 1, 4, 16, 20, tzinfo=timezone.utc)
     assert report.http_cache_age_seconds == 12
     assert status.game_day_state is GameDayState.INACTIVE
-    assert status.confidence is Confidence.OFFICIAL
+    assert status.confidence is Confidence.HIGH
     rendered = render_status_resolution(resolution)
     assert "Origin fresh: no" in rendered
     assert "Local cache age: 5100 seconds" in rendered

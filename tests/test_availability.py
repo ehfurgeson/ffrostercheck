@@ -253,6 +253,8 @@ def test_failed_sources_stay_unknown_and_are_preserved() -> None:
     assert status.injury_designation is InjuryDesignation.UNKNOWN
     assert status.official_inactive is None
     assert status.confidence is Confidence.LOW
+    rendered = render_player_statuses(statuses)
+    assert "Confidence: 0 official, 0 high, 0 medium, 1 low" in rendered
     assert {result.source for result in status.source_results} == {
         "nfl_inactives",
         "nfl_injuries",

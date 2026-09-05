@@ -185,7 +185,10 @@ class StatusCache:
             game_id=game_id,
             reports=cached.reports,
             statuses=combine_official_statuses(
-                chosen_subjects, cached.reports, decision_at=decision_at
+                chosen_subjects,
+                cached.reports,
+                decision_at=decision_at,
+                origin_fresh=False,
             ),
             decision_at=decision_at,
             freshness=StatusFreshness.CACHED_AFTER_FAILED_REFRESH,

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Sequence
 
+from app.analysis.confidence import EvidenceOrigin, score_status_confidence
 from app.models import (
     Confidence,
     FantasyPlayer,
@@ -98,6 +99,7 @@ def combine_official_statuses(
     reports: Sequence[GameSourceReport],
     *,
     decision_at: datetime,
+    origin_fresh: bool = True,
 ) -> tuple[NFLPlayerStatus, ...]:
     """Produce one NFLPlayerStatus per subject, keeping every matched source row."""
 
@@ -109,6 +111,7 @@ def combine_official_statuses(
             assignments.get(subject.canonical_player_id, ()),
             decision_at,
             blocked_active=subject.canonical_player_id in blocked_active,
+            origin_fresh=origin_fresh,
         )
         for subject in _unique_subjects(subjects)
     )
@@ -135,6 +138,13 @@ def render_player_statuses(
             f"{_count(statuses, 'injury_designation', InjuryDesignation.QUESTIONABLE)} questionable, "
             f"{_count(statuses, 'injury_designation', InjuryDesignation.NONE)} none, "
             f"{_count(statuses, 'injury_designation', InjuryDesignation.UNKNOWN)} unknown"
+        ),
+        (
+            "Confidence: "
+            f"{_count(statuses, 'confidence', Confidence.OFFICIAL)} official, "
+            f"{_count(statuses, 'confidence', Confidence.HIGH)} high, "
+            f"{_count(statuses, 'confidence', Confidence.MEDIUM)} medium, "
+            f"{_count(statuses, 'confidence', Confidence.LOW)} low"
         ),
     ]
     for report in reports:
@@ -304,6 +314,7 @@ def _combine_subject(
     decision_at: datetime,
     *,
     blocked_active: bool,
+    origin_fresh: bool = True,
 ) -> NFLPlayerStatus:
     inactives_reports = _reports_named(reports, INACTIVES_SOURCE)
     injuries_reports = _reports_named(reports, INJURIES_SOURCE)
@@ -352,11 +363,11 @@ def _combine_subject(
         roster_eligibility=roster_eligibility,
         game_day_state=game_day_state,
         injury_designation=injury_designation,
-        confidence=_confidence(
-            game_day_state,
-            designation_origin=designation_origin,
-            sleeper_informed=bool(sleeper_rows)
-            and roster_eligibility is not subject.roster_eligibility,
+        confidence=score_status_confidence(
+            _game_day_origin(game_day_state),
+            designation_origin,
+            _eligibility_origin(subject, roster_eligibility, sleeper_rows),
+            origin_fresh=origin_fresh,
         ),
         decision_at=decision_at,
         injury_description=injury_description,
@@ -395,17 +406,21 @@ def _injury_decision(
     sleeper_rows: Sequence[SourceResult] = (),
     nflverse_reports: Sequence[GameSourceReport] = (),
     nflverse_rows: Sequence[SourceResult] = (),
-) -> tuple[InjuryDesignation, str | None, str | None]:
+) -> tuple[InjuryDesignation, str | None, EvidenceOrigin]:
     if injury_rows:
         chosen = max(
             injury_rows,
             key=lambda row: DESIGNATION_SEVERITY[row.injury_designation or InjuryDesignation.UNKNOWN],
         )
-        return chosen.injury_designation or InjuryDesignation.UNKNOWN, chosen.detail, "official"
+        return (
+            chosen.injury_designation or InjuryDesignation.UNKNOWN,
+            chosen.detail,
+            EvidenceOrigin.OFFICIAL,
+        )
     if injuries_reports and all(
         report.report_state is ReportState.COMPLETE for report in injuries_reports
     ):
-        return InjuryDesignation.NONE, None, "official"
+        return InjuryDesignation.NONE, None, EvidenceOrigin.OFFICIAL
 
     sleeper_listed = tuple(
         result for result in sleeper_rows if result.injury_designation is not None
@@ -422,13 +437,13 @@ def _injury_decision(
                 row.injury_designation or InjuryDesignation.UNKNOWN
             ],
         )
-        return chosen.injury_designation or InjuryDesignation.UNKNOWN, chosen.detail, "sleeper"
+        return chosen.injury_designation or InjuryDesignation.UNKNOWN, chosen.detail, EvidenceOrigin.SLEEPER
     if sleeper_listed:
-        return InjuryDesignation.UNKNOWN, sleeper_listed[0].detail, "sleeper"
+        return InjuryDesignation.UNKNOWN, sleeper_listed[0].detail, EvidenceOrigin.SLEEPER
     if sleeper_reports and all(
         report.report_state is ReportState.COMPLETE for report in sleeper_reports
     ):
-        return InjuryDesignation.NONE, None, "sleeper"
+        return InjuryDesignation.NONE, None, EvidenceOrigin.SLEEPER
 
     nflverse_listed = tuple(
         result for result in nflverse_rows if result.injury_designation is not None
@@ -445,12 +460,10 @@ def _injury_decision(
                 row.injury_designation or InjuryDesignation.UNKNOWN
             ],
         )
-        return chosen.injury_designation or InjuryDesignation.UNKNOWN, chosen.detail, "nflverse"
+        return chosen.injury_designation or InjuryDesignation.UNKNOWN, chosen.detail, EvidenceOrigin.NFLVERSE
     if nflverse_listed:
-        return InjuryDesignation.UNKNOWN, nflverse_listed[0].detail, "nflverse"
-    if injuries_reports or sleeper_reports or nflverse_reports:
-        return InjuryDesignation.UNKNOWN, None, None
-    return InjuryDesignation.UNKNOWN, None, None
+        return InjuryDesignation.UNKNOWN, nflverse_listed[0].detail, EvidenceOrigin.NFLVERSE
+    return InjuryDesignation.UNKNOWN, None, EvidenceOrigin.NONE
 
 
 def _roster_eligibility(
@@ -468,20 +481,22 @@ def _roster_eligibility(
     return subject.roster_eligibility
 
 
-def _confidence(
-    game_day_state: GameDayState,
-    *,
-    designation_origin: str | None,
-    sleeper_informed: bool,
-) -> Confidence:
-    official_game_day = game_day_state is not GameDayState.UNKNOWN
-    if official_game_day or designation_origin == "official":
-        return Confidence.OFFICIAL
-    if designation_origin == "sleeper" or sleeper_informed:
-        return Confidence.MEDIUM
-    if designation_origin == "nflverse":
-        return Confidence.LOW
-    return Confidence.LOW
+def _game_day_origin(game_day_state: GameDayState) -> EvidenceOrigin:
+    if game_day_state is GameDayState.UNKNOWN:
+        return EvidenceOrigin.NONE
+    return EvidenceOrigin.OFFICIAL
+
+
+def _eligibility_origin(
+    subject: StatusSubject,
+    roster_eligibility: RosterEligibility,
+    sleeper_rows: Sequence[SourceResult],
+) -> EvidenceOrigin:
+    if roster_eligibility is subject.roster_eligibility:
+        return EvidenceOrigin.NONE
+    if any(result.roster_eligibility is roster_eligibility for result in sleeper_rows):
+        return EvidenceOrigin.SLEEPER
+    return EvidenceOrigin.NONE
 
 
 def _reports_named(reports: Sequence[GameSourceReport], name: str) -> tuple[GameSourceReport, ...]:
