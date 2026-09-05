@@ -7,6 +7,12 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from app.analysis import (
+    combine_official_statuses,
+    render_player_statuses,
+    subjects_from_fantasy_players,
+    subjects_from_source_reports,
+)
 from app.config import ConfigError, load_config, load_environment
 from app.fantasy.espn import ESPNAPIError, ESPNClient, render_espn_roster
 from app.fantasy.manager import FantasyManager, FantasyManagerError, render_all_rosters
@@ -86,6 +92,19 @@ def build_parser() -> argparse.ArgumentParser:
     injuries.add_argument("--home", help="Home team abbreviation for a single-game report")
     injuries.add_argument("--away", help="Away team abbreviation for a single-game report")
     injuries.add_argument("--game-id", default="manual")
+    player_status = subparsers.add_parser(
+        "player-status",
+        description="Combine official inactives and injury reports into one status per player",
+    )
+    player_status.add_argument("--home", required=True, help="Home team abbreviation")
+    player_status.add_argument("--away", required=True, help="Away team abbreviation")
+    player_status.add_argument("--season", type=int, required=True)
+    player_status.add_argument("--week", type=int, required=True)
+    player_status.add_argument("--game-id", default="manual")
+    player_status.add_argument("--inactives-html", type=Path, help="Offline inactives article fixture")
+    player_status.add_argument("--injuries-html", type=Path, help="Offline injury-report fixture")
+    player_status.add_argument("--config", type=Path, help="Optional YAML config to include owned players")
+    player_status.add_argument("--env-file", type=Path, default=Path(".env"))
     return parser
 
 
@@ -108,6 +127,8 @@ def main(argv: list[str] | None = None) -> int:
             return _nfl_inactives(args)
         if args.command == "nfl-injuries":
             return _nfl_injuries(args)
+        if args.command == "player-status":
+            return _player_status(args)
     except (
         ConfigError,
         SleeperAPIError,
@@ -282,3 +303,53 @@ def _nfl_injuries(args: argparse.Namespace) -> int:
             return 0 if report.report_state is not ReportState.FAILED else 1
         print(render_injury_document(source.load_document()))
         return 0 if source.load_document().report_state is not ReportState.FAILED else 1
+
+
+def _player_status(args: argparse.Namespace) -> int:
+    game = RelevantGame(
+        game_id=args.game_id,
+        home_team=args.home,
+        away_team=args.away,
+        kickoff=datetime.now(timezone.utc),
+        fantasy_players=(),
+    )
+    inactives_html = args.inactives_html.read_text(encoding="utf-8") if args.inactives_html else None
+    injuries_html = args.injuries_html.read_text(encoding="utf-8") if args.injuries_html else None
+    inactives_kwargs: dict[str, str] = {}
+    if inactives_html is not None:
+        inactives_kwargs["article_html"] = inactives_html
+        inactives_kwargs["article_url"] = str(args.inactives_html)
+    with (
+        NFLInactivesSource(**inactives_kwargs) as inactives,
+        NFLInjuryReportSource(
+            season=args.season,
+            week=args.week,
+            html=injuries_html,
+        ) as injuries,
+    ):
+        reports = (
+            inactives.fetch_game(game),
+            injuries.fetch_game(game, validate_date=False),
+        )
+    subjects = subjects_from_source_reports(reports)
+    if args.config:
+        mapping, _snapshot = _mapped_rosters(args.config, args.env_file)
+        teams = {args.home.upper(), args.away.upper()}
+        owned = tuple(
+            player
+            for roster in mapping.rosters
+            for player in roster.players
+            if player.nfl_team in teams
+        )
+        subjects = subjects_from_fantasy_players(owned)
+    print(
+        render_player_statuses(
+            combine_official_statuses(
+                subjects,
+                reports,
+                decision_at=datetime.now(timezone.utc),
+            ),
+            reports,
+        )
+    )
+    return 0 if all(report.report_state is not ReportState.FAILED for report in reports) else 1

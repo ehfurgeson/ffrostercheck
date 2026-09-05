@@ -22,7 +22,7 @@ uv run pytest
 
 ## Current milestone
 
-The project currently loads Sleeper and ESPN rosters, resolves canonical NFL identities, groups players by exact kickoff, and parses official NFL.com inactives and weekly injury reports. Injury designations stay on a separate axis from game-day active/inactive status.
+The project currently loads Sleeper and ESPN rosters, resolves canonical NFL identities, groups players by exact kickoff, parses official NFL.com inactives and injury reports, and combines those sources into one status per player.
 
 ```bash
 uv run fantasy-watchdog sleeper-rosters --config config.yaml
@@ -30,6 +30,7 @@ uv run fantasy-watchdog espn-roster --config config.yaml
 uv run fantasy-watchdog all-rosters --config config.yaml
 uv run fantasy-watchdog nfl-inactives --html tests/fixtures/nfl_inactives/week18_excerpt.html --home JAX --away TEN
 uv run fantasy-watchdog nfl-injuries --season 2025 --week 18 --html tests/fixtures/nfl_injuries/week18_excerpt.html --home TB --away CAR
+uv run fantasy-watchdog player-status --season 2025 --week 18 --home JAX --away TEN --inactives-html tests/fixtures/nfl_inactives/week18_excerpt.html --injuries-html tests/fixtures/nfl_injuries/week18_excerpt.html
 ```
 
 Private ESPN leagues use `ESPN_SWID` and `ESPN_S2` from `.env`; credentials are never included in errors or diagnostic output. Official NFL.com diagnostics stay fixture-driven and never infer active or healthy from missing rows.

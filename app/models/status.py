@@ -76,3 +76,21 @@ class GameSourceReport:
     published_at: datetime | None = None
     http_cache_age_seconds: int | None = None
     raw_content_hash: str | None = None
+
+
+@dataclass(frozen=True)
+class NFLPlayerStatus:
+    """One canonical NFL availability record shared across fantasy leagues."""
+
+    canonical_player_id: str
+    roster_eligibility: RosterEligibility
+    game_day_state: GameDayState
+    injury_designation: InjuryDesignation
+    confidence: Confidence
+    decision_at: datetime
+    injury_description: str | None = None
+    official_inactive: bool | None = None
+    source_results: tuple[SourceResult, ...] = ()
+    name: str | None = None
+    nfl_team: str | None = None
+    position: str | None = None
