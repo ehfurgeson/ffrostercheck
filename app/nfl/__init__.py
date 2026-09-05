@@ -22,6 +22,12 @@ from app.nfl.roster import (
     map_rosters_to_nfl,
     render_roster_mapping,
 )
+from app.nfl.sources import (
+    NFLInactivesSource,
+    PlayerStatusSource,
+    render_inactives_document,
+    render_inactives_report,
+)
 from app.nfl.schedule import (
     InvalidScheduleRow,
     KickoffPlan,
@@ -46,6 +52,7 @@ __all__ = [
     "InvalidScheduleRow",
     "KickoffPlan",
     "KickoffWindow",
+    "NFLInactivesSource",
     "NFLSchedule",
     "NFLVerseLoadError",
     "NFLVerseSchemaError",
@@ -55,6 +62,7 @@ __all__ = [
     "NextGameState",
     "PlayerIdentityResolver",
     "PlayerMapping",
+    "PlayerStatusSource",
     "PlayerNextGame",
     "ResolutionMethod",
     "RosterMappingResult",
@@ -63,6 +71,8 @@ __all__ = [
     "group_kickoff_windows",
     "map_rosters_to_nfl",
     "parse_nfl_schedule",
+    "render_inactives_document",
+    "render_inactives_report",
     "render_kickoff_windows",
     "render_next_games",
     "render_roster_mapping",

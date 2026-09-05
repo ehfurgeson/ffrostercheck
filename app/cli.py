@@ -11,7 +11,9 @@ from app.config import ConfigError, load_config, load_environment
 from app.fantasy.espn import ESPNAPIError, ESPNClient, render_espn_roster
 from app.fantasy.manager import FantasyManager, FantasyManagerError, render_all_rosters
 from app.fantasy.sleeper import SleeperAPIError, SleeperClient, render_sleeper_rosters
+from app.models import RelevantGame, ReportState
 from app.nfl import (
+    NFLInactivesSource,
     NFLVerseLoadError,
     NFLVerseSource,
     PlayerIdentityResolver,
@@ -19,6 +21,8 @@ from app.nfl import (
     group_kickoff_windows,
     map_rosters_to_nfl,
     parse_nfl_schedule,
+    render_inactives_document,
+    render_inactives_report,
     render_kickoff_windows,
     render_next_games,
     render_roster_mapping,
@@ -61,6 +65,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     kickoff_windows.add_argument("--config", type=Path, default=Path("config.yaml"))
     kickoff_windows.add_argument("--env-file", type=Path, default=Path(".env"))
+    inactives = subparsers.add_parser(
+        "nfl-inactives",
+        description="Parse official NFL.com inactives without inferring active from absence",
+    )
+    inactives.add_argument("--html", type=Path, help="Offline article or landing-page fixture")
+    inactives.add_argument("--home", help="Home team abbreviation for a single-game report")
+    inactives.add_argument("--away", help="Away team abbreviation for a single-game report")
+    inactives.add_argument("--game-id", default="manual")
     return parser
 
 
@@ -79,6 +91,8 @@ def main(argv: list[str] | None = None) -> int:
             return _next_games(args.config, args.env_file)
         if args.command == "kickoff-windows":
             return _kickoff_windows(args.config, args.env_file)
+        if args.command == "nfl-inactives":
+            return _nfl_inactives(args)
     except (
         ConfigError,
         SleeperAPIError,
@@ -202,3 +216,28 @@ def _mapped_rosters(config_path: Path, env_file: Path):
         rosters=required["rosters"],
     )
     return map_rosters_to_nfl(rosters, resolver), snapshot
+
+
+def _nfl_inactives(args: argparse.Namespace) -> int:
+    html = args.html.read_text(encoding="utf-8") if args.html else None
+    if bool(args.home) != bool(args.away):
+        raise ConfigError("Provide both --home and --away to evaluate a single game")
+    source_kwargs = {}
+    if html is not None:
+        source_kwargs["article_html"] = html
+        source_kwargs["article_url"] = str(args.html)
+    with NFLInactivesSource(**source_kwargs) as source:
+        if args.home and args.away:
+            report = source.fetch_game(
+                RelevantGame(
+                    game_id=args.game_id,
+                    home_team=args.home,
+                    away_team=args.away,
+                    kickoff=datetime.now(timezone.utc),
+                    fantasy_players=(),
+                )
+            )
+            print(render_inactives_report(report))
+            return 0 if report.report_state is not ReportState.FAILED else 1
+        print(render_inactives_document(source.load_document()))
+        return 0 if source.load_document().report_state is not ReportState.FAILED else 1
