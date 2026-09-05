@@ -24,9 +24,12 @@ from app.nfl.roster import (
 )
 from app.nfl.sources import (
     NFLInactivesSource,
+    NFLInjuryReportSource,
     PlayerStatusSource,
     render_inactives_document,
     render_inactives_report,
+    render_injury_document,
+    render_injury_report,
 )
 from app.nfl.schedule import (
     InvalidScheduleRow,
@@ -53,6 +56,7 @@ __all__ = [
     "KickoffPlan",
     "KickoffWindow",
     "NFLInactivesSource",
+    "NFLInjuryReportSource",
     "NFLSchedule",
     "NFLVerseLoadError",
     "NFLVerseSchemaError",
@@ -73,6 +77,8 @@ __all__ = [
     "parse_nfl_schedule",
     "render_inactives_document",
     "render_inactives_report",
+    "render_injury_document",
+    "render_injury_report",
     "render_kickoff_windows",
     "render_next_games",
     "render_roster_mapping",

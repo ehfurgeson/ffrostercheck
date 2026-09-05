@@ -22,24 +22,14 @@ uv run pytest
 
 ## Current milestone
 
-The project currently provides typed configuration plus Sleeper league and roster ingestion. Run the Sleeper diagnostic after creating local configuration:
+The project currently loads Sleeper and ESPN rosters, resolves canonical NFL identities, groups players by exact kickoff, and parses official NFL.com inactives and weekly injury reports. Injury designations stay on a separate axis from game-day active/inactive status.
 
 ```bash
 uv run fantasy-watchdog sleeper-rosters --config config.yaml
-```
-
-The command discovers the configured leagues, prints starters and bench players, and annotates reserve and taxi players without treating nominal roster-slot counts as actual membership.
-
-The matching ESPN diagnostic supports both public and private leagues:
-
-```bash
 uv run fantasy-watchdog espn-roster --config config.yaml
-```
-
-Private leagues use `ESPN_SWID` and `ESPN_S2` from `.env`; credentials are never included in errors or diagnostic output.
-
-To verify every enabled league through the shared platform-neutral model, run:
-
-```bash
 uv run fantasy-watchdog all-rosters --config config.yaml
+uv run fantasy-watchdog nfl-inactives --html tests/fixtures/nfl_inactives/week18_excerpt.html --home JAX --away TEN
+uv run fantasy-watchdog nfl-injuries --season 2025 --week 18 --html tests/fixtures/nfl_injuries/week18_excerpt.html --home TB --away CAR
 ```
+
+Private ESPN leagues use `ESPN_SWID` and `ESPN_S2` from `.env`; credentials are never included in errors or diagnostic output. Official NFL.com diagnostics stay fixture-driven and never infer active or healthy from missing rows.

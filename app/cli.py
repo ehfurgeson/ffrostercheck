@@ -14,6 +14,7 @@ from app.fantasy.sleeper import SleeperAPIError, SleeperClient, render_sleeper_r
 from app.models import RelevantGame, ReportState
 from app.nfl import (
     NFLInactivesSource,
+    NFLInjuryReportSource,
     NFLVerseLoadError,
     NFLVerseSource,
     PlayerIdentityResolver,
@@ -23,6 +24,8 @@ from app.nfl import (
     parse_nfl_schedule,
     render_inactives_document,
     render_inactives_report,
+    render_injury_document,
+    render_injury_report,
     render_kickoff_windows,
     render_next_games,
     render_roster_mapping,
@@ -73,6 +76,16 @@ def build_parser() -> argparse.ArgumentParser:
     inactives.add_argument("--home", help="Home team abbreviation for a single-game report")
     inactives.add_argument("--away", help="Away team abbreviation for a single-game report")
     inactives.add_argument("--game-id", default="manual")
+    injuries = subparsers.add_parser(
+        "nfl-injuries",
+        description="Parse official NFL.com weekly injury reports without inferring active status",
+    )
+    injuries.add_argument("--season", type=int, required=True)
+    injuries.add_argument("--week", type=int, required=True)
+    injuries.add_argument("--html", type=Path, help="Offline injury-report fixture")
+    injuries.add_argument("--home", help="Home team abbreviation for a single-game report")
+    injuries.add_argument("--away", help="Away team abbreviation for a single-game report")
+    injuries.add_argument("--game-id", default="manual")
     return parser
 
 
@@ -93,6 +106,8 @@ def main(argv: list[str] | None = None) -> int:
             return _kickoff_windows(args.config, args.env_file)
         if args.command == "nfl-inactives":
             return _nfl_inactives(args)
+        if args.command == "nfl-injuries":
+            return _nfl_injuries(args)
     except (
         ConfigError,
         SleeperAPIError,
@@ -240,4 +255,30 @@ def _nfl_inactives(args: argparse.Namespace) -> int:
             print(render_inactives_report(report))
             return 0 if report.report_state is not ReportState.FAILED else 1
         print(render_inactives_document(source.load_document()))
+        return 0 if source.load_document().report_state is not ReportState.FAILED else 1
+
+
+def _nfl_injuries(args: argparse.Namespace) -> int:
+    html = args.html.read_text(encoding="utf-8") if args.html else None
+    if bool(args.home) != bool(args.away):
+        raise ConfigError("Provide both --home and --away to evaluate a single game")
+    with NFLInjuryReportSource(
+        season=args.season,
+        week=args.week,
+        html=html,
+    ) as source:
+        if args.home and args.away:
+            report = source.fetch_game(
+                RelevantGame(
+                    game_id=args.game_id,
+                    home_team=args.home,
+                    away_team=args.away,
+                    kickoff=datetime.now(timezone.utc),
+                    fantasy_players=(),
+                ),
+                validate_date=False,
+            )
+            print(render_injury_report(report))
+            return 0 if report.report_state is not ReportState.FAILED else 1
+        print(render_injury_document(source.load_document()))
         return 0 if source.load_document().report_state is not ReportState.FAILED else 1

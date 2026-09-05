@@ -6,10 +6,18 @@ from app.nfl.sources.nfl_inactives import (
     render_inactives_document,
     render_inactives_report,
 )
+from app.nfl.sources.nfl_injuries import (
+    NFLInjuryReportSource,
+    render_injury_document,
+    render_injury_report,
+)
 
 __all__ = [
     "NFLInactivesSource",
+    "NFLInjuryReportSource",
     "PlayerStatusSource",
     "render_inactives_document",
     "render_inactives_report",
+    "render_injury_document",
+    "render_injury_report",
 ]

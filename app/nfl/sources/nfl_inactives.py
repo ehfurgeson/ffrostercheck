@@ -23,6 +23,7 @@ from app.models import (
     SourceResult,
 )
 from app.nfl.identity import normalize_team
+from app.nfl.teams import resolve_team_label
 
 
 INACTIVES_LANDING_URL = "https://www.nfl.com/inactives/"
@@ -65,104 +66,6 @@ POSITIONS = frozenset(
         "LS",
     }
 )
-TEAM_NICKNAMES = {
-    "CARDINALS": "ARI",
-    "ARIZONA": "ARI",
-    "ARIZONA CARDINALS": "ARI",
-    "FALCONS": "ATL",
-    "ATLANTA": "ATL",
-    "ATLANTA FALCONS": "ATL",
-    "RAVENS": "BAL",
-    "BALTIMORE": "BAL",
-    "BALTIMORE RAVENS": "BAL",
-    "BILLS": "BUF",
-    "BUFFALO": "BUF",
-    "BUFFALO BILLS": "BUF",
-    "PANTHERS": "CAR",
-    "CAROLINA": "CAR",
-    "CAROLINA PANTHERS": "CAR",
-    "BEARS": "CHI",
-    "CHICAGO": "CHI",
-    "CHICAGO BEARS": "CHI",
-    "BENGALS": "CIN",
-    "CINCINNATI": "CIN",
-    "CINCINNATI BENGALS": "CIN",
-    "BROWNS": "CLE",
-    "CLEVELAND": "CLE",
-    "CLEVELAND BROWNS": "CLE",
-    "COWBOYS": "DAL",
-    "DALLAS": "DAL",
-    "DALLAS COWBOYS": "DAL",
-    "BRONCOS": "DEN",
-    "DENVER": "DEN",
-    "DENVER BRONCOS": "DEN",
-    "LIONS": "DET",
-    "DETROIT": "DET",
-    "DETROIT LIONS": "DET",
-    "PACKERS": "GB",
-    "GREEN BAY": "GB",
-    "GREEN BAY PACKERS": "GB",
-    "TEXANS": "HOU",
-    "HOUSTON": "HOU",
-    "HOUSTON TEXANS": "HOU",
-    "COLTS": "IND",
-    "INDIANAPOLIS": "IND",
-    "INDIANAPOLIS COLTS": "IND",
-    "JAGUARS": "JAX",
-    "JAGS": "JAX",
-    "JACKSONVILLE": "JAX",
-    "JACKSONVILLE JAGUARS": "JAX",
-    "CHIEFS": "KC",
-    "KANSAS CITY": "KC",
-    "KANSAS CITY CHIEFS": "KC",
-    "RAIDERS": "LV",
-    "LAS VEGAS": "LV",
-    "LAS VEGAS RAIDERS": "LV",
-    "CHARGERS": "LAC",
-    "LOS ANGELES CHARGERS": "LAC",
-    "RAMS": "LAR",
-    "LOS ANGELES RAMS": "LAR",
-    "DOLPHINS": "MIA",
-    "MIAMI": "MIA",
-    "MIAMI DOLPHINS": "MIA",
-    "VIKINGS": "MIN",
-    "MINNESOTA": "MIN",
-    "MINNESOTA VIKINGS": "MIN",
-    "PATRIOTS": "NE",
-    "NEW ENGLAND": "NE",
-    "NEW ENGLAND PATRIOTS": "NE",
-    "SAINTS": "NO",
-    "NEW ORLEANS": "NO",
-    "NEW ORLEANS SAINTS": "NO",
-    "GIANTS": "NYG",
-    "NEW YORK GIANTS": "NYG",
-    "JETS": "NYJ",
-    "NEW YORK JETS": "NYJ",
-    "EAGLES": "PHI",
-    "PHILADELPHIA": "PHI",
-    "PHILADELPHIA EAGLES": "PHI",
-    "STEELERS": "PIT",
-    "PITTSBURGH": "PIT",
-    "PITTSBURGH STEELERS": "PIT",
-    "49ERS": "SF",
-    "NINERS": "SF",
-    "FORTY NINERS": "SF",
-    "SAN FRANCISCO": "SF",
-    "SAN FRANCISCO 49ERS": "SF",
-    "SEAHAWKS": "SEA",
-    "SEATTLE": "SEA",
-    "SEATTLE SEAHAWKS": "SEA",
-    "BUCCANEERS": "TB",
-    "BUCS": "TB",
-    "TAMPA BAY": "TB",
-    "TAMPA BAY BUCCANEERS": "TB",
-    "TITANS": "TEN",
-    "TENNESSEE": "TEN",
-    "TENNESSEE TITANS": "TEN",
-    "COMMANDERS": "WAS",
-    "WASHINGTON": "WAS",
-    "WASHINGTON COMMANDERS": "WAS",
-}
 ANNOTATION_RE = re.compile(r"\(([^)]*)\)")
 
 
@@ -438,12 +341,7 @@ def resolve_team_heading(text: str) -> str | None:
     heading = " ".join(text.split()).upper()
     if not heading or any(marker in heading for marker in WINDOW_MARKERS):
         return None
-    if heading in TEAM_NICKNAMES:
-        return TEAM_NICKNAMES[heading]
-    normalized = normalize_team(heading)
-    if normalized in set(TEAM_NICKNAMES.values()):
-        return normalized
-    return None
+    return resolve_team_label(heading)
 
 
 def render_inactives_document(document: InactivesDocument) -> str:
