@@ -1,5 +1,12 @@
 """NFL and nflverse data integrations."""
 
+from app.nfl.depth_chart import (
+    DepthChartRow,
+    DepthChartSnapshot,
+    DepthSnapshotState,
+    load_latest_depth_snapshot,
+    render_depth_snapshot,
+)
 from app.nfl.identity import (
     CanonicalPlayer,
     CanonicalTeamSource,
@@ -58,6 +65,9 @@ __all__ = [
     "CanonicalTeamSource",
     "DatasetLoad",
     "DatasetState",
+    "DepthChartRow",
+    "DepthChartSnapshot",
+    "DepthSnapshotState",
     "IdentityResolution",
     "InvalidScheduleRow",
     "KickoffPlan",
@@ -83,6 +93,8 @@ __all__ = [
     "SleeperStatusSource",
     "TeamAssignmentSource",
     "assign_next_games",
+    "load_latest_depth_snapshot",
+    "render_depth_snapshot",
     "group_kickoff_windows",
     "map_rosters_to_nfl",
     "parse_nfl_schedule",

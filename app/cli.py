@@ -33,6 +33,8 @@ from app.nfl import (
     group_kickoff_windows,
     map_rosters_to_nfl,
     parse_nfl_schedule,
+    load_latest_depth_snapshot,
+    render_depth_snapshot,
     render_inactives_document,
     render_inactives_report,
     render_injury_document,
@@ -208,6 +210,27 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Treat missing team articles as failure. Default is optional and non-blocking",
     )
+    depth_charts = subparsers.add_parser(
+        "depth-charts",
+        description="Select the latest nflverse depth snapshot at or before decision time",
+    )
+    depth_charts.add_argument("--season", type=int, help="NFL season; defaults to YAML config")
+    depth_charts.add_argument("--config", type=Path, help="Optional YAML config for season and max age")
+    depth_charts.add_argument("--env-file", type=Path, default=Path(".env"))
+    depth_charts.add_argument(
+        "--as-of",
+        help="Timezone-aware ISO decision time; defaults to now in UTC",
+    )
+    depth_charts.add_argument(
+        "--max-age-hours",
+        type=int,
+        help="Stale-snapshot limit in hours; defaults to YAML depth_chart.max_age_hours",
+    )
+    depth_charts.add_argument(
+        "--charts",
+        type=Path,
+        help="Offline nflverse depth-chart JSON fixture",
+    )
     return parser
 
 
@@ -240,6 +263,8 @@ def main(argv: list[str] | None = None) -> int:
             return _nflverse_status(args)
         if args.command == "team-status":
             return _team_status(args)
+        if args.command == "depth-charts":
+            return _depth_charts(args)
     except (
         ConfigError,
         SleeperAPIError,
@@ -447,6 +472,56 @@ def _nflverse_status(args: argparse.Namespace) -> int:
         )
     print(render_nflverse_status_report(report))
     return 0 if report.report_state is not ReportState.FAILED else 1
+
+
+def _depth_charts(args: argparse.Namespace) -> int:
+    season, max_age_hours = _depth_chart_settings(args)
+    rows = _load_depth_chart_rows(args.charts) if args.charts else None
+    snapshot = load_latest_depth_snapshot(
+        season,
+        as_of=_parse_as_of(args.as_of),
+        max_age_hours=max_age_hours,
+        rows=rows,
+    )
+    print(render_depth_snapshot(snapshot))
+    return 0
+
+
+def _depth_chart_settings(args: argparse.Namespace) -> tuple[int, int]:
+    config = load_config(args.config) if args.config else None
+    season = args.season if args.season is not None else (config.season if config else None)
+    if season is None:
+        raise ConfigError("Provide --season or --config so the depth-chart season is known")
+    max_age = (
+        args.max_age_hours
+        if args.max_age_hours is not None
+        else (config.depth_chart.max_age_hours if config else 30)
+    )
+    if max_age <= 0:
+        raise ConfigError("max_age_hours must be greater than 0")
+    return season, max_age
+
+
+def _parse_as_of(value: str | None) -> datetime:
+    if value is None:
+        return datetime.now(timezone.utc)
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise ConfigError(f"Invalid --as-of timestamp: {value}") from exc
+    if parsed.tzinfo is None:
+        raise ConfigError("--as-of must be a timezone-aware ISO timestamp")
+    return parsed.astimezone(timezone.utc)
+
+
+def _load_depth_chart_rows(path: Path) -> list:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, list) or not all(isinstance(row, dict) for row in payload):
+        raise ConfigError(f"nflverse depth-chart fixture is invalid: {path}")
+    return payload
 
 
 def _team_status(args: argparse.Namespace) -> int:

@@ -14,10 +14,16 @@ from app.nfl.nflverse import (
 
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "nflverse"
+DEPTH_CHART_FIXTURE = Path(__file__).parent / "fixtures" / "depth_charts" / "snapshots.json"
 
 
 def _frame(name: str) -> pl.DataFrame:
     rows = json.loads((FIXTURE_DIR / f"{name}.json").read_text(encoding="utf-8"))
+    return pl.DataFrame(rows)
+
+
+def _depth_chart_frame() -> pl.DataFrame:
+    rows = json.loads(DEPTH_CHART_FIXTURE.read_text(encoding="utf-8"))
     return pl.DataFrame(rows)
 
 
@@ -28,10 +34,12 @@ class FixtureLoader:
         schedules: Callable[[], pl.DataFrame] | None = None,
         rosters: Callable[[], pl.DataFrame] | None = None,
         injuries: Callable[[], pl.DataFrame] | None = None,
+        depth_charts: Callable[[], pl.DataFrame] | None = None,
     ) -> None:
         self._schedules = schedules or (lambda: _frame("schedules"))
         self._rosters = rosters or (lambda: _frame("rosters"))
         self._injuries = injuries or (lambda: _frame("injuries"))
+        self._depth_charts = depth_charts or _depth_chart_frame
         self.calls: list[tuple[str, int | None]] = []
 
     def load_schedules(self, season: int) -> pl.DataFrame:
@@ -53,6 +61,10 @@ class FixtureLoader:
     def load_injuries(self, season: int) -> pl.DataFrame:
         self.calls.append(("injuries", season))
         return self._injuries()
+
+    def load_depth_charts(self, season: int) -> pl.DataFrame:
+        self.calls.append(("depth_charts", season))
+        return self._depth_charts()
 
 
 def test_core_datasets_follow_the_offline_source_contracts() -> None:
@@ -116,12 +128,17 @@ def test_parse_error_is_not_mislabeled_as_an_unsupported_season() -> None:
         NFLVerseSource(FixtureLoader(schedules=invalid_schedules)).load_snapshot(2026)
 
 
-def test_core_snapshot_does_not_load_injuries() -> None:
+def test_core_snapshot_does_not_load_injuries_or_depth_charts() -> None:
     loader = FixtureLoader()
 
     NFLVerseSource(loader).load_snapshot(2026)
 
-    assert "injuries" not in {name for name, _season in loader.calls}
+    assert {name for name, _season in loader.calls} == {
+        "schedules",
+        "players",
+        "rosters",
+        "fantasy_player_ids",
+    }
 
 
 def test_injuries_follow_the_offline_source_contract() -> None:
@@ -169,3 +186,42 @@ def test_injury_schema_failure_still_raises() -> None:
 
     with pytest.raises(NFLVerseSchemaError, match="injuries.*report_status"):
         NFLVerseSource(FixtureLoader(injuries=incomplete_injuries)).load_injuries(2025)
+
+
+def test_depth_charts_follow_the_offline_source_contract() -> None:
+    dataset = NFLVerseSource(FixtureLoader()).load_depth_charts(2026)
+
+    assert dataset.available
+    assert dataset.frame is not None
+    assert dataset.frame.height == 9
+
+
+def test_unsupported_depth_chart_season_is_isolated() -> None:
+    def unsupported_depth_charts() -> pl.DataFrame:
+        raise ValueError("Season must be between 2001 and 2025")
+
+    dataset = NFLVerseSource(
+        FixtureLoader(depth_charts=unsupported_depth_charts)
+    ).load_depth_charts(2026)
+
+    assert dataset.state is DatasetState.UNSUPPORTED_SEASON
+    assert dataset.frame is None
+    assert dataset.detail == "Season must be between 2001 and 2025"
+
+
+def test_empty_depth_chart_season_is_explicitly_unavailable() -> None:
+    dataset = NFLVerseSource(
+        FixtureLoader(depth_charts=lambda: _depth_chart_frame().clear())
+    ).load_depth_charts(2026)
+
+    assert dataset.state is DatasetState.UNSUPPORTED_SEASON
+    assert dataset.detail == "No depth_charts rows are available for season 2026"
+
+
+def test_depth_chart_schema_failure_still_raises() -> None:
+    def incomplete_depth_charts() -> pl.DataFrame:
+        return _depth_chart_frame().drop("dt")
+
+    with pytest.raises(NFLVerseSchemaError, match="depth_charts.*dt"):
+        NFLVerseSource(FixtureLoader(depth_charts=incomplete_depth_charts)).load_depth_charts(2026)
+

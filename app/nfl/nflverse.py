@@ -63,6 +63,22 @@ INJURY_COLUMNS = frozenset(
         "report_status",
     }
 )
+DEPTH_CHART_COLUMNS = frozenset(
+    {
+        "dt",
+        "team",
+        "player_name",
+        "espn_id",
+        "gsis_id",
+        "pos_grp_id",
+        "pos_grp",
+        "pos_id",
+        "pos_name",
+        "pos_abb",
+        "pos_slot",
+        "pos_rank",
+    }
+)
 
 
 class DataFrameLike(Protocol):
@@ -86,6 +102,8 @@ class NFLReadPyLike(Protocol):
     def load_ff_playerids(self) -> DataFrameLike: ...
 
     def load_injuries(self, seasons: int) -> DataFrameLike: ...
+
+    def load_depth_charts(self, seasons: int) -> DataFrameLike: ...
 
 
 class DatasetState(str, Enum):
@@ -176,18 +194,42 @@ class NFLVerseSource:
         than an application error. Schema-contract failures still raise.
         """
 
+        return self._load_optional(
+            "injuries",
+            lambda: self._loader.load_injuries(season),
+            INJURY_COLUMNS,
+            season=season,
+        )
+
+    def load_depth_charts(self, season: int) -> DatasetLoad:
+        """Load timestamped depth charts as an independent context dataset.
+
+        Unavailable or unsupported seasons become ``UNSUPPORTED_SEASON`` rather
+        than an application error. Schema-contract failures still raise.
+        """
+
+        return self._load_optional(
+            "depth_charts",
+            lambda: self._loader.load_depth_charts(season),
+            DEPTH_CHART_COLUMNS,
+            season=season,
+        )
+
+    def _load_optional(
+        self,
+        name: str,
+        load: Callable[[], DataFrameLike],
+        required_columns: frozenset[str],
+        *,
+        season: int,
+    ) -> DatasetLoad:
         try:
-            return self._load(
-                "injuries",
-                lambda: self._loader.load_injuries(season),
-                INJURY_COLUMNS,
-                season=season,
-            )
+            return self._load(name, load, required_columns, season=season)
         except NFLVerseSchemaError:
             raise
         except NFLVerseLoadError as exc:
             return DatasetLoad(
-                name="injuries",
+                name=name,
                 state=DatasetState.UNSUPPORTED_SEASON,
                 frame=None,
                 season=season,
