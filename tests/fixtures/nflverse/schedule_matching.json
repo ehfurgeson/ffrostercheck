@@ -1,0 +1,82 @@
+[
+  {
+    "game_id": "2026_01_DAL_PHI",
+    "season": 2026,
+    "game_type": "REG",
+    "week": 1,
+    "gameday": "2026-09-10",
+    "gametime": "20:20",
+    "away_team": "DAL",
+    "home_team": "PHI"
+  },
+  {
+    "game_id": "2026_01_BUF_BAL",
+    "season": 2026,
+    "game_type": "REG",
+    "week": 1,
+    "gameday": "2026-09-13",
+    "gametime": "13:00",
+    "away_team": "BUF",
+    "home_team": "BAL"
+  },
+  {
+    "game_id": "2026_01_MIA_NE",
+    "season": 2026,
+    "game_type": "REG",
+    "week": 1,
+    "gameday": "2026-09-13",
+    "gametime": "16:05",
+    "away_team": "MIA",
+    "home_team": "NE"
+  },
+  {
+    "game_id": "2026_01_KC_LAC",
+    "season": 2026,
+    "game_type": "REG",
+    "week": 1,
+    "gameday": "2026-09-13",
+    "gametime": "16:25",
+    "away_team": "KC",
+    "home_team": "LAC"
+  },
+  {
+    "game_id": "2026_02_NYJ_BUF",
+    "season": 2026,
+    "game_type": "REG",
+    "week": 2,
+    "gameday": "2026-09-20",
+    "gametime": "13:00",
+    "away_team": "NYJ",
+    "home_team": "BUF"
+  },
+  {
+    "game_id": "2026_PRE_GB_CHI",
+    "season": 2026,
+    "game_type": "PRE",
+    "week": 3,
+    "gameday": "2026-08-22",
+    "gametime": "13:00",
+    "away_team": "GB",
+    "home_team": "CHI"
+  },
+  {
+    "game_id": "2026_01_LA_SEA",
+    "season": 2026,
+    "game_type": "REG",
+    "week": 1,
+    "gameday": "2026-09-13",
+    "gametime": "16:05",
+    "away_team": "LA",
+    "home_team": "SEA"
+  },
+  {
+    "game_id": "2026_01_BAD_ROW",
+    "season": 2026,
+    "game_type": "REG",
+    "week": 1,
+    "gameday": "2026-09-13",
+    "gametime": "",
+    "away_team": "TEN",
+    "home_team": "JAX"
+  }
+]

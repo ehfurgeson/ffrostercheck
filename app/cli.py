@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from app.config import ConfigError, load_config, load_environment
@@ -14,7 +15,10 @@ from app.nfl import (
     NFLVerseLoadError,
     NFLVerseSource,
     PlayerIdentityResolver,
+    assign_next_games,
     map_rosters_to_nfl,
+    parse_nfl_schedule,
+    render_next_games,
     render_roster_mapping,
 )
 
@@ -43,6 +47,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     resolved_rosters.add_argument("--config", type=Path, default=Path("config.yaml"))
     resolved_rosters.add_argument("--env-file", type=Path, default=Path(".env"))
+    next_games = subparsers.add_parser(
+        "next-games",
+        description="Map every resolved fantasy player to their next unstarted NFL game",
+    )
+    next_games.add_argument("--config", type=Path, default=Path("config.yaml"))
+    next_games.add_argument("--env-file", type=Path, default=Path(".env"))
     return parser
 
 
@@ -57,6 +67,8 @@ def main(argv: list[str] | None = None) -> int:
             return _all_rosters(args.config, args.env_file)
         if args.command == "resolved-rosters":
             return _resolved_rosters(args.config, args.env_file)
+        if args.command == "next-games":
+            return _next_games(args.config, args.env_file)
     except (
         ConfigError,
         SleeperAPIError,
@@ -123,6 +135,27 @@ def _all_rosters(config_path: Path, env_file: Path) -> int:
 
 
 def _resolved_rosters(config_path: Path, env_file: Path) -> int:
+    mapping, _snapshot = _mapped_rosters(config_path, env_file)
+    print(render_roster_mapping(mapping))
+    return 0 if not mapping.unresolved else 1
+
+
+def _next_games(config_path: Path, env_file: Path) -> int:
+    mapping, snapshot = _mapped_rosters(config_path, env_file)
+    if snapshot.schedules.frame is None:
+        raise NFLVerseLoadError(
+            "Cannot assign next games; unavailable nflverse data: schedules"
+        )
+    result = assign_next_games(
+        mapping.rosters,
+        parse_nfl_schedule(snapshot.schedules.frame),
+        as_of=datetime.now(timezone.utc),
+    )
+    print(render_next_games(result))
+    return 0 if not result.data_errors else 1
+
+
+def _mapped_rosters(config_path: Path, env_file: Path):
     config = load_config(config_path)
     environment = load_environment(env_file=env_file)
     with (
@@ -148,6 +181,4 @@ def _resolved_rosters(config_path: Path, env_file: Path) -> int:
         players=required["players"],
         rosters=required["rosters"],
     )
-    result = map_rosters_to_nfl(rosters, resolver)
-    print(render_roster_mapping(result))
-    return 0 if not result.unresolved else 1
+    return map_rosters_to_nfl(rosters, resolver), snapshot
