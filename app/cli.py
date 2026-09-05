@@ -25,6 +25,8 @@ from app.nfl import (
     NFLVerseLoadError,
     NFLVerseSource,
     NFLVerseStatusSource,
+    OfficialTeamArticle,
+    OfficialTeamSource,
     PlayerIdentityResolver,
     SleeperStatusSource,
     assign_next_games,
@@ -40,6 +42,7 @@ from app.nfl import (
     render_nflverse_status_report,
     render_roster_mapping,
     render_sleeper_status_report,
+    render_team_status_report,
 )
 from app.storage.cache import (
     StatusCache,
@@ -124,6 +127,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Optional offline nflverse injuries fixture used as a lower-confidence fallback",
     )
+    player_status.add_argument(
+        "--team-html",
+        action="append",
+        default=[],
+        metavar="TEAM=PATH",
+        help="Optional official team-site HTML fixture; may be repeated. Narrative is never binary status",
+    )
     player_status.add_argument("--config", type=Path, help="Optional YAML config to include owned players")
     player_status.add_argument("--env-file", type=Path, default=Path(".env"))
     status_cache = subparsers.add_parser(
@@ -172,6 +182,32 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Offline nflverse injuries JSON fixture",
     )
+    team_status = subparsers.add_parser(
+        "team-status",
+        description="Parse optional official team-site articles as attributed notes, never as binary status",
+    )
+    team_status.add_argument("--home", required=True, help="Home team abbreviation")
+    team_status.add_argument("--away", required=True, help="Away team abbreviation")
+    team_status.add_argument("--game-id", default="manual")
+    team_status.add_argument(
+        "--article",
+        action="append",
+        default=[],
+        metavar="TEAM=PATH",
+        help="Official team HTML fixture; may be repeated, e.g. GB=tests/fixtures/team_sites/packers_lists.html",
+    )
+    team_status.add_argument(
+        "--url",
+        action="append",
+        default=[],
+        metavar="TEAM=URL",
+        help="Optional source URL used for attribution, e.g. GB=https://www.packers.com/news/...",
+    )
+    team_status.add_argument(
+        "--required",
+        action="store_true",
+        help="Treat missing team articles as failure. Default is optional and non-blocking",
+    )
     return parser
 
 
@@ -202,6 +238,8 @@ def main(argv: list[str] | None = None) -> int:
             return _sleeper_status(args)
         if args.command == "nflverse-status":
             return _nflverse_status(args)
+        if args.command == "team-status":
+            return _team_status(args)
     except (
         ConfigError,
         SleeperAPIError,
@@ -411,6 +449,24 @@ def _nflverse_status(args: argparse.Namespace) -> int:
     return 0 if report.report_state is not ReportState.FAILED else 1
 
 
+def _team_status(args: argparse.Namespace) -> int:
+    articles = _team_articles(args.article, args.url)
+    with OfficialTeamSource(articles=articles, required=args.required) as source:
+        report = source.fetch_game(
+            RelevantGame(
+                game_id=args.game_id,
+                home_team=args.home,
+                away_team=args.away,
+                kickoff=datetime.now(timezone.utc),
+                fantasy_players=(),
+            )
+        )
+    print(render_team_status_report(report))
+    if args.required:
+        return 0 if report.report_state is not ReportState.FAILED else 1
+    return 0
+
+
 def _player_status(args: argparse.Namespace) -> int:
     reports, subjects = _official_status_inputs(args)
     print(
@@ -423,7 +479,7 @@ def _player_status(args: argparse.Namespace) -> int:
             reports,
         )
     )
-    return 0 if all(report.report_state is not ReportState.FAILED for report in reports) else 1
+    return _status_exit_code(reports, team_required=False)
 
 
 def _status_cache(args: argparse.Namespace) -> int:
@@ -440,7 +496,7 @@ def _status_cache(args: argparse.Namespace) -> int:
         )
         print(render_cached_snapshot(snapshot))
         print(render_player_statuses(snapshot.statuses, snapshot.reports))
-        return 0 if all(report.report_state is not ReportState.FAILED for report in reports) else 1
+        return _status_exit_code(reports, team_required=False)
 
     resolution = cache.resolve_final(
         game_id=args.game_id,
@@ -451,7 +507,7 @@ def _status_cache(args: argparse.Namespace) -> int:
     print(render_status_resolution(resolution))
     print(render_player_statuses(resolution.statuses, resolution.reports))
     if resolution.origin_fresh:
-        return 0 if all(report.report_state is not ReportState.FAILED for report in resolution.reports) else 1
+        return _status_exit_code(resolution.reports, team_required=False)
     return 0
 
 
@@ -498,7 +554,50 @@ def _official_reports(args: argparse.Namespace):
             rows=_load_nflverse_injury_rows(nflverse_injuries),
         ) as nflverse:
             reports.append(nflverse.fetch_game(game))
+    team_html = getattr(args, "team_html", None)
+    if team_html:
+        with OfficialTeamSource(articles=_team_articles(team_html, ())) as team_source:
+            reports.append(team_source.fetch_game(game))
     return tuple(reports)
+
+
+def _team_articles(html_args: list[str], url_args: list[str]) -> dict[str, OfficialTeamArticle]:
+    urls = _parse_team_pairs(url_args, "TEAM=URL")
+    html_paths = _parse_team_pairs(html_args, "TEAM=PATH")
+    teams = set(urls) | set(html_paths)
+    articles: dict[str, OfficialTeamArticle] = {}
+    for team in sorted(teams):
+        path = html_paths.get(team)
+        articles[team] = OfficialTeamArticle(
+            team=team,
+            html=Path(path).read_text(encoding="utf-8") if path else None,
+            url=urls.get(team),
+        )
+    return articles
+
+
+def _parse_team_pairs(values: list[str], metavar: str) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for value in values:
+        if "=" not in value:
+            raise ConfigError(f"Use {metavar}, e.g. GB=tests/fixtures/team_sites/packers_lists.html")
+        team, payload = value.split("=", 1)
+        team = team.strip().upper()
+        payload = payload.strip()
+        if not team or not payload:
+            raise ConfigError(f"Use {metavar}, e.g. GB=tests/fixtures/team_sites/packers_lists.html")
+        parsed[team] = payload
+    return parsed
+
+
+def _status_exit_code(reports, *, team_required: bool) -> int:
+    for report in reports:
+        if report.report_state is not ReportState.FAILED:
+            continue
+        if report.source == "official_team" and not team_required:
+            continue
+        return 1
+    return 0
 
 
 def _load_sleeper_catalog(path: Path) -> dict:

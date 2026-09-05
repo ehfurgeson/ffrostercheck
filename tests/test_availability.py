@@ -773,6 +773,108 @@ def test_unsupported_nflverse_season_stays_unknown() -> None:
     assert any(result.success is False for result in status.source_results)
 
 
+def test_official_team_notes_never_override_or_invent_binary_status() -> None:
+    statuses = combine_official_statuses(
+        (
+            _subject(
+                canonical_player_id="00-reed",
+                name="Jayden Reed",
+                team="GB",
+                position="WR",
+            ),
+            _subject(
+                canonical_player_id="00-love",
+                name="Jordan Love",
+                team="GB",
+                position="QB",
+                eligibility=RosterEligibility.ELIGIBLE,
+            ),
+        ),
+        (
+            _report(
+                "nfl_inactives",
+                ReportState.COMPLETE,
+                _result(
+                    source="nfl_inactives",
+                    name="Jayden Reed",
+                    team="GB",
+                    position="WR",
+                    game_day_state=GameDayState.INACTIVE,
+                ),
+                expected_teams=frozenset({"GB", "CHI"}),
+            ),
+            _report(
+                "official_team",
+                ReportState.PARTIAL,
+                _result(
+                    source="official_team",
+                    name="Jayden Reed",
+                    team="GB",
+                    position="WR",
+                    game_day_state=GameDayState.ACTIVE,
+                    detail="packers.com says Reed will play",
+                ),
+                _result(
+                    source="official_team",
+                    name="Jordan Love",
+                    team="GB",
+                    position="QB",
+                    game_day_state=GameDayState.INACTIVE,
+                    injury_designation=InjuryDesignation.OUT,
+                    detail="packers.com listed Jordan Love among inactives",
+                ),
+                expected_teams=frozenset({"GB", "CHI"}),
+                parsed_teams=frozenset({"GB"}),
+            ),
+        ),
+        decision_at=NOW,
+    )
+
+    by_name = {status.name: status for status in statuses}
+    assert by_name["Jayden Reed"].game_day_state is GameDayState.INACTIVE
+    assert by_name["Jayden Reed"].official_inactive is True
+    assert by_name["Jayden Reed"].confidence is Confidence.OFFICIAL
+    assert by_name["Jordan Love"].game_day_state is GameDayState.ACTIVE
+    assert by_name["Jordan Love"].injury_designation is InjuryDesignation.UNKNOWN
+    assert by_name["Jordan Love"].official_inactive is False
+    rendered = render_player_statuses(statuses, (
+        _report(
+            "official_team",
+            ReportState.PARTIAL,
+            expected_teams=frozenset({"GB", "CHI"}),
+            parsed_teams=frozenset({"GB"}),
+        ),
+    ))
+    assert "attributed notes only" in rendered
+    assert any(
+        result.source == "official_team" and "will play" in (result.detail or "")
+        for result in by_name["Jayden Reed"].source_results
+    )
+
+
+def test_failed_optional_team_source_does_not_change_official_status() -> None:
+    statuses = combine_official_statuses(
+        (_subject(eligibility=RosterEligibility.ELIGIBLE),),
+        (
+            _report("nfl_inactives", ReportState.COMPLETE),
+            _report("nfl_injuries", ReportState.COMPLETE),
+            _report(
+                "official_team",
+                ReportState.FAILED,
+                errors=("packers.com 503",),
+                expected_teams=frozenset({"TEN", "JAX"}),
+            ),
+        ),
+        decision_at=NOW,
+    )
+
+    status = statuses[0]
+    assert status.game_day_state is GameDayState.ACTIVE
+    assert status.injury_designation is InjuryDesignation.NONE
+    assert status.confidence is Confidence.OFFICIAL
+    assert any(result.source == "official_team" and result.success is False for result in status.source_results)
+
+
 def _fantasy_player(
     canonical_player_id: str,
     name: str,

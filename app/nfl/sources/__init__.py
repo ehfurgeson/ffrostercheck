@@ -19,11 +19,18 @@ from app.nfl.sources.sleeper_status import (
     SleeperStatusSource,
     render_sleeper_status_report,
 )
+from app.nfl.sources.team_sites import (
+    OfficialTeamArticle,
+    OfficialTeamSource,
+    render_team_status_report,
+)
 
 __all__ = [
     "NFLInactivesSource",
     "NFLInjuryReportSource",
     "NFLVerseStatusSource",
+    "OfficialTeamArticle",
+    "OfficialTeamSource",
     "PlayerStatusSource",
     "SleeperStatusSource",
     "render_inactives_document",
@@ -32,4 +39,5 @@ __all__ = [
     "render_injury_report",
     "render_nflverse_status_report",
     "render_sleeper_status_report",
+    "render_team_status_report",
 ]

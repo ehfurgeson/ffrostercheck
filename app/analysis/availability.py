@@ -23,6 +23,7 @@ from app.nfl.identity import normalize_name, normalize_position, normalize_team
 
 INACTIVES_SOURCE = "nfl_inactives"
 INJURIES_SOURCE = "nfl_injuries"
+TEAM_SOURCE = "official_team"
 SLEEPER_SOURCE = "sleeper_status"
 NFLVERSE_SOURCE = "nflverse_status"
 DESIGNATION_SEVERITY = {
@@ -149,11 +150,21 @@ def render_player_statuses(
     ]
     for report in reports:
         coverage = ", ".join(sorted(report.parsed_teams)) or "none"
+        suffix = (
+            " — attributed notes only"
+            if report.source == TEAM_SOURCE
+            else ""
+        )
         lines.append(
-            f"  {report.source}: {report.report_state.value} (teams: {coverage})"
+            f"  {report.source}: {report.report_state.value} (teams: {coverage}){suffix}"
         )
         for error in report.errors:
             lines.append(f"    error: {error}")
+        if report.source == TEAM_SOURCE:
+            for result in report.player_results:
+                if result.player_name or not result.detail:
+                    continue
+                lines.append(f"    note: {result.detail}")
     for status in statuses:
         identity = status.name or status.canonical_player_id
         position = f"{status.position} " if status.position else ""
@@ -277,7 +288,9 @@ def _strict_position_match(left: str | None, right: str | None) -> bool:
 
 def _coverage_result(report: GameSourceReport, subject: StatusSubject) -> SourceResult:
     team = normalize_team(subject.nfl_team)
-    if report.report_state is ReportState.FAILED:
+    if report.source == TEAM_SOURCE:
+        detail = _team_coverage_detail(report, team)
+    elif report.report_state is ReportState.FAILED:
         detail = "; ".join(report.errors) or "Report failed"
     elif report.report_state is ReportState.NOT_YET_PUBLISHED:
         detail = "Report is not yet published"
@@ -497,6 +510,17 @@ def _eligibility_origin(
     if any(result.roster_eligibility is roster_eligibility for result in sleeper_rows):
         return EvidenceOrigin.SLEEPER
     return EvidenceOrigin.NONE
+
+
+def _team_coverage_detail(report: GameSourceReport, team: str | None) -> str:
+    if report.report_state is ReportState.FAILED:
+        return "Official team context failed and was ignored for binary status"
+    if report.report_state is ReportState.NOT_YET_PUBLISHED:
+        return "Official team context was not available"
+    if report.report_state is ReportState.PARTIAL and team and team not in report.parsed_teams:
+        missing = ", ".join(sorted(report.expected_teams - report.parsed_teams)) or "unknown"
+        return f"No official team article for this player's team (missing {missing})"
+    return "No attributed official-team note for this player"
 
 
 def _reports_named(reports: Sequence[GameSourceReport], name: str) -> tuple[GameSourceReport, ...]:
