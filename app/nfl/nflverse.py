@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, Protocol
+from typing import Any, Callable, Protocol
 
 import nflreadpy as nfl
 
@@ -58,6 +58,8 @@ class DataFrameLike(Protocol):
 
     columns: list[str]
     height: int
+
+    def iter_rows(self, *, named: bool = False) -> Any: ...
 
 
 class NFLReadPyLike(Protocol):
