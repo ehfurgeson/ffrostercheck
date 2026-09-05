@@ -2,6 +2,7 @@
 
 from app.nfl.identity import (
     CanonicalPlayer,
+    CanonicalTeamSource,
     IdentityResolution,
     PlayerIdentityResolver,
     ResolutionMethod,
@@ -14,9 +15,17 @@ from app.nfl.nflverse import (
     NFLVerseSnapshot,
     NFLVerseSource,
 )
+from app.nfl.roster import (
+    PlayerMapping,
+    RosterMappingResult,
+    TeamAssignmentSource,
+    map_rosters_to_nfl,
+    render_roster_mapping,
+)
 
 __all__ = [
     "CanonicalPlayer",
+    "CanonicalTeamSource",
     "DatasetLoad",
     "DatasetState",
     "IdentityResolution",
@@ -25,5 +34,10 @@ __all__ = [
     "NFLVerseSnapshot",
     "NFLVerseSource",
     "PlayerIdentityResolver",
+    "PlayerMapping",
     "ResolutionMethod",
+    "RosterMappingResult",
+    "TeamAssignmentSource",
+    "map_rosters_to_nfl",
+    "render_roster_mapping",
 ]

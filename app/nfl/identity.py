@@ -20,6 +20,7 @@ TEAM_ALIASES = {
     "HST": "HOU",
     "JAC": "JAX",
     "KCC": "KC",
+    "LA": "LAR",
     "LVR": "LV",
     "NEP": "NE",
     "NOS": "NO",
@@ -34,6 +35,14 @@ TEAM_DEFENSE_POSITIONS = frozenset({"DEF", "DST", "D/ST"})
 NAME_SUFFIXES = frozenset({"jr", "sr", "ii", "iii", "iv", "v"})
 
 
+class CanonicalTeamSource(str, Enum):
+    CURRENT_ROSTER = "current_roster"
+    PLAYER_METADATA = "player_metadata"
+    FANTASY_ID_CROSSWALK = "fantasy_id_crosswalk"
+    PLATFORM = "platform"
+    UNKNOWN = "unknown"
+
+
 @dataclass(frozen=True)
 class CanonicalPlayer:
     """One real NFL player keyed by a stable GSIS identifier."""
@@ -44,6 +53,7 @@ class CanonicalPlayer:
     position: str | None
     espn_id: str | None = None
     sleeper_id: str | None = None
+    team_source: CanonicalTeamSource = CanonicalTeamSource.UNKNOWN
 
     @property
     def gsis_id(self) -> str:
@@ -82,6 +92,7 @@ class _IdentityBuilder:
     position: str | None = None
     espn_id: str | None = None
     sleeper_id: str | None = None
+    team_source: CanonicalTeamSource = CanonicalTeamSource.UNKNOWN
 
     def freeze(self) -> CanonicalPlayer | None:
         if not self.name:
@@ -93,6 +104,7 @@ class _IdentityBuilder:
             position=self.position,
             espn_id=self.espn_id,
             sleeper_id=self.sleeper_id,
+            team_source=self.team_source,
         )
 
 
@@ -150,6 +162,7 @@ class PlayerIdentityResolver:
                 team_field="team",
                 overwrite_context=False,
                 include_sleeper=True,
+                team_source=CanonicalTeamSource.FANTASY_ID_CROSSWALK,
             )
         for row in _rows(players):
             _merge_identity(
@@ -157,8 +170,9 @@ class PlayerIdentityResolver:
                 row,
                 name_field="display_name",
                 team_field="latest_team",
-                overwrite_context=False,
+                overwrite_context=True,
                 include_sleeper=False,
+                team_source=CanonicalTeamSource.PLAYER_METADATA,
             )
         roster_rows = sorted(
             _rows(rosters),
@@ -172,6 +186,7 @@ class PlayerIdentityResolver:
                 team_field="team",
                 overwrite_context=True,
                 include_sleeper=True,
+                team_source=CanonicalTeamSource.CURRENT_ROSTER,
             )
 
         identities = tuple(
@@ -260,6 +275,7 @@ class PlayerIdentityResolver:
                         name=f"{normalized_team} D/ST",
                         team=normalized_team,
                         position="DST",
+                        team_source=CanonicalTeamSource.PLATFORM,
                     ),
                     method=ResolutionMethod.TEAM_DEFENSE,
                 )
@@ -363,6 +379,7 @@ def _merge_identity(
     team_field: str,
     overwrite_context: bool,
     include_sleeper: bool,
+    team_source: CanonicalTeamSource,
 ) -> None:
     gsis_id = _optional_id(row.get("gsis_id"))
     if not gsis_id:
@@ -376,14 +393,18 @@ def _merge_identity(
 
     if overwrite_context:
         builder.name = name or builder.name
-        builder.team = team or builder.team
+        if team:
+            builder.team = team
+            builder.team_source = team_source
         builder.position = position or builder.position
         builder.espn_id = espn_id or builder.espn_id
         builder.sleeper_id = sleeper_id or builder.sleeper_id
         return
 
     builder.name = builder.name or name
-    builder.team = builder.team or team
+    if not builder.team and team:
+        builder.team = team
+        builder.team_source = team_source
     builder.position = builder.position or position
     builder.espn_id = builder.espn_id or espn_id
     builder.sleeper_id = builder.sleeper_id or sleeper_id
