@@ -16,8 +16,10 @@ from app.nfl import (
     NFLVerseSource,
     PlayerIdentityResolver,
     assign_next_games,
+    group_kickoff_windows,
     map_rosters_to_nfl,
     parse_nfl_schedule,
+    render_kickoff_windows,
     render_next_games,
     render_roster_mapping,
 )
@@ -53,6 +55,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     next_games.add_argument("--config", type=Path, default=Path("config.yaml"))
     next_games.add_argument("--env-file", type=Path, default=Path(".env"))
+    kickoff_windows = subparsers.add_parser(
+        "kickoff-windows",
+        description="Print fantasy alert candidates grouped by exact NFL kickoff",
+    )
+    kickoff_windows.add_argument("--config", type=Path, default=Path("config.yaml"))
+    kickoff_windows.add_argument("--env-file", type=Path, default=Path(".env"))
     return parser
 
 
@@ -69,6 +77,8 @@ def main(argv: list[str] | None = None) -> int:
             return _resolved_rosters(args.config, args.env_file)
         if args.command == "next-games":
             return _next_games(args.config, args.env_file)
+        if args.command == "kickoff-windows":
+            return _kickoff_windows(args.config, args.env_file)
     except (
         ConfigError,
         SleeperAPIError,
@@ -141,18 +151,28 @@ def _resolved_rosters(config_path: Path, env_file: Path) -> int:
 
 
 def _next_games(config_path: Path, env_file: Path) -> int:
+    result = _assigned_next_games(config_path, env_file)
+    print(render_next_games(result))
+    return 0 if not result.data_errors else 1
+
+
+def _kickoff_windows(config_path: Path, env_file: Path) -> int:
+    result = _assigned_next_games(config_path, env_file)
+    print(render_kickoff_windows(group_kickoff_windows(result)))
+    return 0 if not result.data_errors else 1
+
+
+def _assigned_next_games(config_path: Path, env_file: Path):
     mapping, snapshot = _mapped_rosters(config_path, env_file)
     if snapshot.schedules.frame is None:
         raise NFLVerseLoadError(
             "Cannot assign next games; unavailable nflverse data: schedules"
         )
-    result = assign_next_games(
+    return assign_next_games(
         mapping.rosters,
         parse_nfl_schedule(snapshot.schedules.frame),
         as_of=datetime.now(timezone.utc),
     )
-    print(render_next_games(result))
-    return 0 if not result.data_errors else 1
 
 
 def _mapped_rosters(config_path: Path, env_file: Path):

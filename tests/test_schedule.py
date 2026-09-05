@@ -10,7 +10,9 @@ from app.models import FantasyLeague, FantasyPlatform, FantasyPlayer, FantasyRos
 from app.nfl.schedule import (
     NextGameState,
     assign_next_games,
+    group_kickoff_windows,
     parse_nfl_schedule,
+    render_kickoff_windows,
     render_next_games,
 )
 
@@ -182,6 +184,87 @@ def test_invalid_team_rows_do_not_create_a_game() -> None:
     assert result.assignments[0].state is NextGameState.INVALID_SCHEDULE
     assert result.assignments[0].game is None
     assert result.data_errors
+
+
+def test_kickoff_windows_keep_four_oh_five_and_four_twenty_five_separate() -> None:
+    schedule = parse_nfl_schedule(_fixture_frame())
+    as_of = datetime(2026, 9, 4, 12, 0, tzinfo=EASTERN)
+    roster = _roster(
+        _player(name="Miami Starter", team="MIA", player_id="mia"),
+        _player(name="Kansas City Starter", team="KC", player_id="kc"),
+        _player(name="Bills Starter", team="BUF", player_id="buf"),
+        _player(name="Rams Starter", team="LAR", player_id="lar"),
+    )
+
+    plan = group_kickoff_windows(assign_next_games((roster,), schedule, as_of=as_of))
+
+    assert [window.kickoff.astimezone(EASTERN).strftime("%H:%M") for window in plan.windows] == [
+        "13:00",
+        "16:05",
+        "16:25",
+    ]
+    assert [game.game_id for game in plan.windows[1].games] == [
+        "2026_01_LA_SEA",
+        "2026_01_MIA_NE",
+    ]
+    assert plan.windows[2].games[0].game_id == "2026_01_KC_LAC"
+
+
+def test_unmatched_players_are_excluded_from_kickoff_windows() -> None:
+    schedule = parse_nfl_schedule(_fixture_frame())
+    as_of = datetime(2026, 9, 4, 12, 0, tzinfo=EASTERN)
+    roster = _roster(
+        _player(name="Bills Starter", team="BUF", player_id="buf"),
+        _player(name="Free Agent", team=None, player_id="fa"),
+        _player(name="No Game", team="CIN", player_id="cin"),
+        _player(name="Bad Schedule", team="TEN", player_id="ten"),
+    )
+
+    assignment = assign_next_games((roster,), schedule, as_of=as_of)
+    plan = group_kickoff_windows(assignment)
+    rendered = render_kickoff_windows(plan)
+
+    assert len(plan.windows) == 1
+    assert [player.name for player in plan.alert_candidates] == ["Bills Starter"]
+    assert {item.player.name for item in plan.unmatched} == {
+        "Free Agent",
+        "No Game",
+        "Bad Schedule",
+    }
+    assert "1:00 PM ET kickoff" in rendered
+    assert "Unmatched players:" in rendered
+    assert "CIN" in rendered
+    assert "Free Agent" not in plan.windows[0].games[0].fantasy_players[0].name
+
+
+def test_shared_kickoff_keeps_separate_games_and_repeated_fantasy_instances() -> None:
+    schedule = parse_nfl_schedule(_fixture_frame())
+    as_of = datetime(2026, 9, 4, 12, 0, tzinfo=EASTERN)
+    first = _player(name="Shared Player", team="BUF", player_id="buf-1")
+    second = FantasyPlayer(
+        platform_player_id="buf-2",
+        name="Shared Player",
+        nfl_team="BUF",
+        position="WR",
+        league_id="league-2",
+        league_name="Other League",
+        platform=FantasyPlatform.SLEEPER,
+        lineup_slot="WR",
+        eligible_slots=("WR",),
+        is_starter=False,
+        canonical_player_id="00-001",
+    )
+
+    plan = group_kickoff_windows(
+        assign_next_games((_roster(first, second),), schedule, as_of=as_of)
+    )
+
+    assert len(plan.windows) == 1
+    assert len(plan.relevant_games) == 1
+    assert [player.league_name for player in plan.alert_candidates] == [
+        "Fixture League",
+        "Other League",
+    ]
 
 
 def test_naive_as_of_is_rejected() -> None:

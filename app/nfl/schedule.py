@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Any, Mapping, Sequence
 from zoneinfo import ZoneInfo
 
-from app.models import FantasyPlayer, FantasyRoster, NFLGame
+from app.models import FantasyPlayer, FantasyRoster, NFLGame, RelevantGame
 from app.nfl.identity import normalize_team
 from app.nfl.nflverse import DataFrameLike
 
@@ -85,6 +85,32 @@ class NextGameAssignmentResult:
         )
 
 
+@dataclass(frozen=True)
+class KickoffWindow:
+    """All relevant NFL games that share one exact kickoff instant."""
+
+    kickoff: datetime
+    games: tuple[RelevantGame, ...]
+
+    @property
+    def fantasy_players(self) -> tuple[FantasyPlayer, ...]:
+        return tuple(player for game in self.games for player in game.fantasy_players)
+
+
+@dataclass(frozen=True)
+class KickoffPlan:
+    windows: tuple[KickoffWindow, ...]
+    unmatched: tuple[PlayerNextGame, ...]
+
+    @property
+    def relevant_games(self) -> tuple[RelevantGame, ...]:
+        return tuple(game for window in self.windows for game in window.games)
+
+    @property
+    def alert_candidates(self) -> tuple[FantasyPlayer, ...]:
+        return tuple(player for window in self.windows for player in window.fantasy_players)
+
+
 def parse_nfl_schedule(frame: DataFrameLike) -> NFLSchedule:
     """Parse schedule rows without inventing kickoffs for incomplete data."""
 
@@ -136,6 +162,85 @@ def assign_next_games(
         for player in roster.players
     )
     return NextGameAssignmentResult(assignments, schedule)
+
+
+def group_kickoff_windows(result: NextGameAssignmentResult) -> KickoffPlan:
+    """Group matched next games by exact kickoff; leave unmatched players out."""
+
+    players_by_game: dict[str, list[FantasyPlayer]] = {}
+    games_by_id: dict[str, NFLGame] = {}
+    for item in result.matched:
+        if item.game is None:
+            continue
+        games_by_id[item.game.game_id] = item.game
+        players_by_game.setdefault(item.game.game_id, []).append(item.player)
+
+    relevant_games = [
+        RelevantGame(
+            game_id=game.game_id,
+            home_team=game.home_team,
+            away_team=game.away_team,
+            kickoff=game.kickoff,
+            fantasy_players=tuple(
+                sorted(
+                    players_by_game[game.game_id],
+                    key=lambda player: (
+                        player.league_name,
+                        player.name,
+                        player.platform_player_id,
+                    ),
+                )
+            ),
+        )
+        for game in sorted(games_by_id.values(), key=lambda game: (game.kickoff, game.game_id))
+    ]
+
+    window_games: dict[datetime, list[RelevantGame]] = {}
+    for game in relevant_games:
+        window_games.setdefault(game.kickoff, []).append(game)
+
+    windows = tuple(
+        KickoffWindow(kickoff=kickoff, games=tuple(games))
+        for kickoff, games in sorted(window_games.items())
+    )
+    return KickoffPlan(windows=windows, unmatched=result.unmatched)
+
+
+def render_kickoff_windows(plan: KickoffPlan) -> str:
+    """Render alert candidates by exact kickoff without merging distinct times."""
+
+    lines = [
+        f"Kickoff windows: {len(plan.windows)}",
+        f"Alert candidates: {len(plan.alert_candidates)}",
+        f"Unmatched: {len(plan.unmatched)}",
+    ]
+    for window in plan.windows:
+        lines.append("")
+        lines.append(
+            f"{_format_kickoff_label(window.kickoff)} kickoff — "
+            f"{len(window.fantasy_players)} candidates"
+        )
+        for game in window.games:
+            lines.append(f"  {game.away_team} @ {game.home_team} — {game.game_id}")
+            for player in game.fantasy_players:
+                role = "STARTING" if player.is_starter else "BENCH"
+                team_position = "/".join(
+                    value for value in (player.nfl_team, player.position) if value
+                )
+                detail = f" ({team_position})" if team_position else ""
+                lines.append(
+                    f"    {player.league_name} — {player.name}{detail} — {role}"
+                )
+    if plan.unmatched:
+        lines.append("")
+        lines.append("Unmatched players:")
+        for item in plan.unmatched:
+            team = item.player.nfl_team or "none"
+            lines.append(
+                f"  {item.state.value}: {item.player.league_name} — {item.player.name} — "
+                f"{team} — {item.detail}"
+            )
+    return "\n".join(lines)
 
 
 def render_next_games(result: NextGameAssignmentResult) -> str:
@@ -344,6 +449,13 @@ def _matched_teams(
 
 def _format_kickoff(kickoff: datetime) -> str:
     return kickoff.astimezone(EASTERN).strftime("%Y-%m-%d %H:%M ET")
+
+
+def _format_kickoff_label(kickoff: datetime) -> str:
+    local = kickoff.astimezone(EASTERN)
+    hour = local.hour % 12 or 12
+    meridiem = "AM" if local.hour < 12 else "PM"
+    return f"{local.strftime('%Y-%m-%d')} {hour}:{local.strftime('%M')} {meridiem} ET"
 
 
 def _rows(frame: DataFrameLike) -> list[Mapping[str, Any]]:

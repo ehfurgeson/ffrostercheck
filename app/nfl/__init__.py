@@ -24,12 +24,16 @@ from app.nfl.roster import (
 )
 from app.nfl.schedule import (
     InvalidScheduleRow,
+    KickoffPlan,
+    KickoffWindow,
     NextGameAssignmentResult,
     NextGameState,
     NFLSchedule,
     PlayerNextGame,
     assign_next_games,
+    group_kickoff_windows,
     parse_nfl_schedule,
+    render_kickoff_windows,
     render_next_games,
 )
 
@@ -40,6 +44,8 @@ __all__ = [
     "DatasetState",
     "IdentityResolution",
     "InvalidScheduleRow",
+    "KickoffPlan",
+    "KickoffWindow",
     "NFLSchedule",
     "NFLVerseLoadError",
     "NFLVerseSchemaError",
@@ -54,8 +60,10 @@ __all__ = [
     "RosterMappingResult",
     "TeamAssignmentSource",
     "assign_next_games",
+    "group_kickoff_windows",
     "map_rosters_to_nfl",
     "parse_nfl_schedule",
+    "render_kickoff_windows",
     "render_next_games",
     "render_roster_mapping",
 ]
