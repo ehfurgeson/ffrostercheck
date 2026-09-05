@@ -51,6 +51,18 @@ FF_PLAYER_ID_COLUMNS = frozenset(
         "sleeper_id",
     }
 )
+INJURY_COLUMNS = frozenset(
+    {
+        "season",
+        "team",
+        "week",
+        "gsis_id",
+        "position",
+        "full_name",
+        "report_primary_injury",
+        "report_status",
+    }
+)
 
 
 class DataFrameLike(Protocol):
@@ -72,6 +84,8 @@ class NFLReadPyLike(Protocol):
     def load_rosters(self, seasons: int) -> DataFrameLike: ...
 
     def load_ff_playerids(self) -> DataFrameLike: ...
+
+    def load_injuries(self, seasons: int) -> DataFrameLike: ...
 
 
 class DatasetState(str, Enum):
@@ -155,6 +169,31 @@ class NFLVerseSource:
             ),
         )
 
+    def load_injuries(self, season: int) -> DatasetLoad:
+        """Load weekly injuries as an independent fallback dataset.
+
+        Unavailable or unsupported seasons become ``UNSUPPORTED_SEASON`` rather
+        than an application error. Schema-contract failures still raise.
+        """
+
+        try:
+            return self._load(
+                "injuries",
+                lambda: self._loader.load_injuries(season),
+                INJURY_COLUMNS,
+                season=season,
+            )
+        except NFLVerseSchemaError:
+            raise
+        except NFLVerseLoadError as exc:
+            return DatasetLoad(
+                name="injuries",
+                state=DatasetState.UNSUPPORTED_SEASON,
+                frame=None,
+                season=season,
+                detail=str(exc),
+            )
+
     @staticmethod
     def _load(
         name: str,
@@ -212,6 +251,8 @@ def _is_unsupported_season(exc: ValueError) -> bool:
             "season must be between",
             "season is not available",
             "season not available",
+            "season is not available yet",
+            "not available yet",
             "unsupported season",
         )
     )

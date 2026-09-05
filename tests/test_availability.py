@@ -55,6 +55,7 @@ def _result(
     game_day_state: GameDayState | None = None,
     injury_designation: InjuryDesignation | None = None,
     roster_eligibility: RosterEligibility | None = None,
+    canonical_player_id: str | None = None,
     detail: str | None = None,
 ) -> SourceResult:
     return SourceResult(
@@ -70,6 +71,7 @@ def _result(
         player_name=name,
         nfl_team=team,
         position=position,
+        canonical_player_id=canonical_player_id,
     )
 
 
@@ -584,6 +586,189 @@ def test_sleeper_ir_blocks_active_inference_from_complete_inactives() -> None:
     assert status.official_inactive is False
     assert status.injury_designation is InjuryDesignation.OUT
     assert status.confidence is Confidence.MEDIUM
+
+
+def test_nflverse_does_not_set_game_day_active() -> None:
+    statuses = combine_official_statuses(
+        (_subject(canonical_player_id="00-0035678"),),
+        (
+            _report(
+                "nflverse_status",
+                ReportState.COMPLETE,
+                _result(
+                    source="nflverse_status",
+                    canonical_player_id="00-0035678",
+                    injury_designation=InjuryDesignation.QUESTIONABLE,
+                    detail="report_status=Questionable",
+                ),
+            ),
+        ),
+        decision_at=NOW,
+    )
+
+    status = statuses[0]
+    assert status.game_day_state is GameDayState.UNKNOWN
+    assert status.injury_designation is InjuryDesignation.QUESTIONABLE
+    assert status.confidence is Confidence.LOW
+    assert status.official_inactive is None
+
+
+def test_nflverse_can_match_by_gsis_when_names_differ() -> None:
+    statuses = combine_official_statuses(
+        (_subject(canonical_player_id="00-0035678", name="A. Hooker"),),
+        (
+            _report(
+                "nflverse_status",
+                ReportState.COMPLETE,
+                _result(
+                    source="nflverse_status",
+                    name="Amani Hooker",
+                    canonical_player_id="00-0035678",
+                    injury_designation=InjuryDesignation.QUESTIONABLE,
+                    detail="report_status=Questionable",
+                ),
+            ),
+        ),
+        decision_at=NOW,
+    )
+
+    assert statuses[0].injury_designation is InjuryDesignation.QUESTIONABLE
+    assert statuses[0].confidence is Confidence.LOW
+
+
+def test_complete_official_injury_report_keeps_control_over_nflverse() -> None:
+    statuses = combine_official_statuses(
+        (_subject(canonical_player_id="00-0035678", name="Trevor Lawrence", team="JAX", position="QB"),),
+        (
+            _report(
+                "nfl_injuries",
+                ReportState.COMPLETE,
+                expected_teams=frozenset({"TEN", "JAX"}),
+            ),
+            _report(
+                "nflverse_status",
+                ReportState.COMPLETE,
+                _result(
+                    source="nflverse_status",
+                    name="Trevor Lawrence",
+                    team="JAX",
+                    position="QB",
+                    canonical_player_id="00-0035678",
+                    injury_designation=InjuryDesignation.QUESTIONABLE,
+                    detail="report_status=Questionable",
+                ),
+                expected_teams=frozenset({"TEN", "JAX"}),
+            ),
+        ),
+        decision_at=NOW,
+    )
+
+    status = statuses[0]
+    assert status.injury_designation is InjuryDesignation.NONE
+    assert status.confidence is Confidence.OFFICIAL
+    assert any(
+        result.source == "nflverse_status"
+        and result.injury_designation is InjuryDesignation.QUESTIONABLE
+        for result in status.source_results
+    )
+
+
+def test_sleeper_is_preferred_over_nflverse_when_official_injuries_are_unpublished() -> None:
+    statuses = combine_official_statuses(
+        (_subject(canonical_player_id="00-0035678"),),
+        (
+            _report("nfl_injuries", ReportState.NOT_YET_PUBLISHED),
+            _report(
+                "sleeper_status",
+                ReportState.COMPLETE,
+                _result(
+                    source="sleeper_status",
+                    injury_designation=InjuryDesignation.QUESTIONABLE,
+                    detail="injury_status=Questionable",
+                ),
+            ),
+            _report(
+                "nflverse_status",
+                ReportState.COMPLETE,
+                _result(
+                    source="nflverse_status",
+                    canonical_player_id="00-0035678",
+                    injury_designation=InjuryDesignation.OUT,
+                    detail="report_status=Out",
+                ),
+            ),
+        ),
+        decision_at=NOW,
+    )
+
+    status = statuses[0]
+    assert status.injury_designation is InjuryDesignation.QUESTIONABLE
+    assert status.confidence is Confidence.MEDIUM
+    assert any(result.source == "nflverse_status" for result in status.source_results)
+
+
+def test_nflverse_fills_designation_when_official_and_sleeper_are_unavailable() -> None:
+    statuses = combine_official_statuses(
+        (_subject(canonical_player_id="00-0035678"),),
+        (
+            _report("nfl_injuries", ReportState.NOT_YET_PUBLISHED),
+            _report(
+                "nflverse_status",
+                ReportState.COMPLETE,
+                _result(
+                    source="nflverse_status",
+                    canonical_player_id="00-0035678",
+                    injury_designation=InjuryDesignation.QUESTIONABLE,
+                    detail="report_status=Questionable",
+                ),
+            ),
+        ),
+        decision_at=NOW,
+    )
+
+    status = statuses[0]
+    assert status.game_day_state is GameDayState.UNKNOWN
+    assert status.injury_designation is InjuryDesignation.QUESTIONABLE
+    assert status.confidence is Confidence.LOW
+
+
+def test_nflverse_absence_does_not_infer_healthy() -> None:
+    statuses = combine_official_statuses(
+        (_subject(name="Trevor Lawrence", team="JAX", position="QB"),),
+        (
+            _report(
+                "nflverse_status",
+                ReportState.COMPLETE,
+                expected_teams=frozenset({"TEN", "JAX"}),
+            ),
+        ),
+        decision_at=NOW,
+    )
+
+    status = statuses[0]
+    assert status.injury_designation is InjuryDesignation.UNKNOWN
+    assert status.game_day_state is GameDayState.UNKNOWN
+    assert status.confidence is Confidence.LOW
+
+
+def test_unsupported_nflverse_season_stays_unknown() -> None:
+    statuses = combine_official_statuses(
+        (_subject(),),
+        (
+            _report(
+                "nflverse_status",
+                ReportState.FAILED,
+                errors=("Season must be between 2009 and 2025",),
+            ),
+        ),
+        decision_at=NOW,
+    )
+
+    status = statuses[0]
+    assert status.game_day_state is GameDayState.UNKNOWN
+    assert status.injury_designation is InjuryDesignation.UNKNOWN
+    assert status.confidence is Confidence.LOW
+    assert any(result.success is False for result in status.source_results)
 
 
 def _fantasy_player(

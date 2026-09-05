@@ -1,0 +1,86 @@
+[
+  {
+    "season": 2025,
+    "season_type": "REG",
+    "team": "TEN",
+    "week": 18,
+    "gsis_id": "00-0035678",
+    "position": "S",
+    "full_name": "Amani Hooker",
+    "report_primary_injury": "Ankle",
+    "report_secondary_injury": null,
+    "report_status": "Questionable",
+    "practice_status": "Limited Participation in Practice",
+    "date_modified": "2026-01-03T18:00:00Z"
+  },
+  {
+    "season": 2025,
+    "season_type": "REG",
+    "team": "TEN",
+    "week": 18,
+    "gsis_id": "00-0039999",
+    "position": "TE",
+    "full_name": "Gunnar Helm",
+    "report_primary_injury": "Knee",
+    "report_status": "Out",
+    "practice_status": "Did Not Participate In Practice",
+    "date_modified": "2026-01-03T18:05:00Z"
+  },
+  {
+    "season": 2025,
+    "season_type": "REG",
+    "team": "JAX",
+    "week": 18,
+    "gsis_id": "00-0037777",
+    "position": "RB",
+    "full_name": "Doubtful Back",
+    "report_primary_injury": "Hamstring",
+    "report_status": "Doubtful",
+    "date_modified": "2026-01-03T17:00:00Z"
+  },
+  {
+    "season": 2025,
+    "season_type": "REG",
+    "team": "JAX",
+    "week": 18,
+    "gsis_id": "00-0038888",
+    "position": "WR",
+    "full_name": "Mystery Status",
+    "report_primary_injury": "Illness",
+    "report_status": "SomethingWeird",
+    "date_modified": "2026-01-03T16:00:00Z"
+  },
+  {
+    "season": 2025,
+    "season_type": "REG",
+    "team": "BUF",
+    "week": 18,
+    "gsis_id": "00-0030000",
+    "position": "QB",
+    "full_name": "Other Conference",
+    "report_status": "Out",
+    "date_modified": "2026-01-03T12:00:00Z"
+  },
+  {
+    "season": 2025,
+    "season_type": "REG",
+    "team": "JAX",
+    "week": 17,
+    "gsis_id": "00-0031111",
+    "position": "QB",
+    "full_name": "Wrong Week",
+    "report_status": "Out",
+    "date_modified": "2025-12-28T12:00:00Z"
+  },
+  {
+    "season": 2025,
+    "season_type": "POST",
+    "team": "TEN",
+    "week": 18,
+    "gsis_id": "00-0032222",
+    "position": "WR",
+    "full_name": "Postseason Receiver",
+    "report_status": "Out",
+    "date_modified": "2026-01-10T12:00:00Z"
+  }
+]

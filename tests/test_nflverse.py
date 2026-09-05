@@ -27,9 +27,11 @@ class FixtureLoader:
         *,
         schedules: Callable[[], pl.DataFrame] | None = None,
         rosters: Callable[[], pl.DataFrame] | None = None,
+        injuries: Callable[[], pl.DataFrame] | None = None,
     ) -> None:
         self._schedules = schedules or (lambda: _frame("schedules"))
         self._rosters = rosters or (lambda: _frame("rosters"))
+        self._injuries = injuries or (lambda: _frame("injuries"))
         self.calls: list[tuple[str, int | None]] = []
 
     def load_schedules(self, season: int) -> pl.DataFrame:
@@ -47,6 +49,10 @@ class FixtureLoader:
     def load_ff_playerids(self) -> pl.DataFrame:
         self.calls.append(("fantasy_player_ids", None))
         return _frame("fantasy_player_ids")
+
+    def load_injuries(self, season: int) -> pl.DataFrame:
+        self.calls.append(("injuries", season))
+        return self._injuries()
 
 
 def test_core_datasets_follow_the_offline_source_contracts() -> None:
@@ -108,3 +114,58 @@ def test_parse_error_is_not_mislabeled_as_an_unsupported_season() -> None:
 
     with pytest.raises(NFLVerseLoadError, match="Unable to load nflverse schedules"):
         NFLVerseSource(FixtureLoader(schedules=invalid_schedules)).load_snapshot(2026)
+
+
+def test_core_snapshot_does_not_load_injuries() -> None:
+    loader = FixtureLoader()
+
+    NFLVerseSource(loader).load_snapshot(2026)
+
+    assert "injuries" not in {name for name, _season in loader.calls}
+
+
+def test_injuries_follow_the_offline_source_contract() -> None:
+    dataset = NFLVerseSource(FixtureLoader()).load_injuries(2025)
+
+    assert dataset.available
+    assert dataset.frame is not None
+    assert dataset.frame.height == 7
+
+
+def test_unsupported_injury_season_is_isolated() -> None:
+    def unsupported_injuries() -> pl.DataFrame:
+        raise ValueError("Season must be between 2009 and 2025")
+
+    dataset = NFLVerseSource(FixtureLoader(injuries=unsupported_injuries)).load_injuries(2026)
+
+    assert dataset.state is DatasetState.UNSUPPORTED_SEASON
+    assert dataset.frame is None
+    assert dataset.detail == "Season must be between 2009 and 2025"
+
+
+def test_injury_download_failure_is_unavailable_not_an_application_error() -> None:
+    def missing_injuries() -> pl.DataFrame:
+        raise ConnectionError("Failed to download injuries_2026.parquet: 404")
+
+    dataset = NFLVerseSource(FixtureLoader(injuries=missing_injuries)).load_injuries(2026)
+
+    assert dataset.state is DatasetState.UNSUPPORTED_SEASON
+    assert dataset.frame is None
+    assert "404" in (dataset.detail or "")
+
+
+def test_empty_injury_season_is_explicitly_unavailable() -> None:
+    dataset = NFLVerseSource(
+        FixtureLoader(injuries=lambda: _frame("injuries").clear())
+    ).load_injuries(2026)
+
+    assert dataset.state is DatasetState.UNSUPPORTED_SEASON
+    assert dataset.detail == "No injuries rows are available for season 2026"
+
+
+def test_injury_schema_failure_still_raises() -> None:
+    def incomplete_injuries() -> pl.DataFrame:
+        return _frame("injuries").drop("report_status")
+
+    with pytest.raises(NFLVerseSchemaError, match="injuries.*report_status"):
+        NFLVerseSource(FixtureLoader(injuries=incomplete_injuries)).load_injuries(2025)

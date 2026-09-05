@@ -55,6 +55,7 @@ class SourceResult:
     player_name: str | None = None
     nfl_team: str | None = None
     position: str | None = None
+    canonical_player_id: str | None = None
     published_at: datetime | None = None
     source_updated_at: datetime | None = None
     http_cache_age_seconds: int | None = None

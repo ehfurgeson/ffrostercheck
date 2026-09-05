@@ -25,12 +25,14 @@ from app.nfl.roster import (
 from app.nfl.sources import (
     NFLInactivesSource,
     NFLInjuryReportSource,
+    NFLVerseStatusSource,
     PlayerStatusSource,
     SleeperStatusSource,
     render_inactives_document,
     render_inactives_report,
     render_injury_document,
     render_injury_report,
+    render_nflverse_status_report,
     render_sleeper_status_report,
 )
 from app.nfl.schedule import (
@@ -64,6 +66,7 @@ __all__ = [
     "NFLVerseSchemaError",
     "NFLVerseSnapshot",
     "NFLVerseSource",
+    "NFLVerseStatusSource",
     "NextGameAssignmentResult",
     "NextGameState",
     "PlayerIdentityResolver",
@@ -82,6 +85,7 @@ __all__ = [
     "render_inactives_report",
     "render_injury_document",
     "render_injury_report",
+    "render_nflverse_status_report",
     "render_sleeper_status_report",
     "render_kickoff_windows",
     "render_next_games",

@@ -23,6 +23,7 @@ from app.nfl.identity import normalize_name, normalize_position, normalize_team
 INACTIVES_SOURCE = "nfl_inactives"
 INJURIES_SOURCE = "nfl_injuries"
 SLEEPER_SOURCE = "sleeper_status"
+NFLVERSE_SOURCE = "nflverse_status"
 DESIGNATION_SEVERITY = {
     InjuryDesignation.OUT: 4,
     InjuryDesignation.DOUBTFUL: 3,
@@ -214,6 +215,16 @@ def _unique_match(
     result: SourceResult,
     subjects: Sequence[StatusSubject],
 ) -> StatusSubject | None:
+    if result.canonical_player_id:
+        id_matches = [
+            subject
+            for subject in subjects
+            if subject.canonical_player_id == result.canonical_player_id
+        ]
+        if len(id_matches) == 1:
+            return id_matches[0]
+        if len(id_matches) > 1:
+            return None
     name_team_matches = [subject for subject in subjects if _name_team_match(subject, result)]
     if not name_team_matches:
         return None
@@ -278,6 +289,7 @@ def _coverage_result(report: GameSourceReport, subject: StatusSubject) -> Source
         player_name=subject.name,
         nfl_team=subject.nfl_team,
         position=subject.position,
+        canonical_player_id=subject.canonical_player_id,
         published_at=report.published_at,
         source_updated_at=report.source_updated_at,
         http_cache_age_seconds=report.http_cache_age_seconds,
@@ -296,6 +308,7 @@ def _combine_subject(
     inactives_reports = _reports_named(reports, INACTIVES_SOURCE)
     injuries_reports = _reports_named(reports, INJURIES_SOURCE)
     sleeper_reports = _reports_named(reports, SLEEPER_SOURCE)
+    nflverse_reports = _reports_named(reports, NFLVERSE_SOURCE)
     inactive_rows = tuple(
         result
         for result in source_results
@@ -308,6 +321,9 @@ def _combine_subject(
     )
     sleeper_rows = tuple(
         result for result in source_results if result.source == SLEEPER_SOURCE
+    )
+    nflverse_rows = tuple(
+        result for result in source_results if result.source == NFLVERSE_SOURCE
     )
     roster_eligibility = _roster_eligibility(subject, sleeper_rows)
     eligible_subject = StatusSubject(
@@ -328,6 +344,8 @@ def _combine_subject(
         injury_rows,
         sleeper_reports,
         sleeper_rows,
+        nflverse_reports,
+        nflverse_rows,
     )
     return NFLPlayerStatus(
         canonical_player_id=subject.canonical_player_id,
@@ -375,6 +393,8 @@ def _injury_decision(
     injury_rows: Sequence[SourceResult],
     sleeper_reports: Sequence[GameSourceReport] = (),
     sleeper_rows: Sequence[SourceResult] = (),
+    nflverse_reports: Sequence[GameSourceReport] = (),
+    nflverse_rows: Sequence[SourceResult] = (),
 ) -> tuple[InjuryDesignation, str | None, str | None]:
     if injury_rows:
         chosen = max(
@@ -409,7 +429,26 @@ def _injury_decision(
         report.report_state is ReportState.COMPLETE for report in sleeper_reports
     ):
         return InjuryDesignation.NONE, None, "sleeper"
-    if injuries_reports or sleeper_reports:
+
+    nflverse_listed = tuple(
+        result for result in nflverse_rows if result.injury_designation is not None
+    )
+    nflverse_known = tuple(
+        result
+        for result in nflverse_listed
+        if result.injury_designation is not InjuryDesignation.UNKNOWN
+    )
+    if nflverse_known:
+        chosen = max(
+            nflverse_known,
+            key=lambda row: DESIGNATION_SEVERITY[
+                row.injury_designation or InjuryDesignation.UNKNOWN
+            ],
+        )
+        return chosen.injury_designation or InjuryDesignation.UNKNOWN, chosen.detail, "nflverse"
+    if nflverse_listed:
+        return InjuryDesignation.UNKNOWN, nflverse_listed[0].detail, "nflverse"
+    if injuries_reports or sleeper_reports or nflverse_reports:
         return InjuryDesignation.UNKNOWN, None, None
     return InjuryDesignation.UNKNOWN, None, None
 
@@ -440,6 +479,8 @@ def _confidence(
         return Confidence.OFFICIAL
     if designation_origin == "sleeper" or sleeper_informed:
         return Confidence.MEDIUM
+    if designation_origin == "nflverse":
+        return Confidence.LOW
     return Confidence.LOW
 
 
