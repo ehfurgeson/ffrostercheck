@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, tzinfo
+from html import escape
 from typing import Mapping, Sequence
 from zoneinfo import ZoneInfo
 
@@ -32,6 +33,14 @@ class TextEmail:
     body: str
 
 
+@dataclass(frozen=True)
+class HtmlEmail:
+    """A transport-neutral email subject and HTML body."""
+
+    subject: str
+    body: str
+
+
 def build_text_email(
     kickoff: datetime,
     leagues: Sequence[FantasyLeagueStatuses],
@@ -42,14 +51,11 @@ def build_text_email(
 ) -> TextEmail:
     """Render one kickoff-window alert, grouped by urgency and then league."""
 
-    if kickoff.tzinfo is None or kickoff.utcoffset() is None:
-        raise ValueError("kickoff must be timezone-aware")
-    if minutes_before_kickoff < 0:
-        raise ValueError("minutes_before_kickoff must be at least 0")
-
-    local_kickoff = kickoff.astimezone(display_timezone)
-    kickoff_label = local_kickoff.strftime("%I:%M %p %Z").lstrip("0")
-    subject = f"Fantasy Check — {kickoff_label} kickoff in {minutes_before_kickoff} min"
+    kickoff_label, subject = _email_header(
+        kickoff,
+        display_timezone,
+        minutes_before_kickoff,
+    )
     options_by_starter = _index_replacement_options(replacement_options)
     lines = [f"{kickoff_label} GAMES"]
 
@@ -69,6 +75,75 @@ def build_text_email(
             lines.extend(("", heading, "", rendered_leagues))
 
     return TextEmail(subject=subject, body="\n".join(lines))
+
+
+def build_html_email(
+    kickoff: datetime,
+    leagues: Sequence[FantasyLeagueStatuses],
+    replacement_options: Sequence[StarterReplacementOptions] = (),
+    *,
+    display_timezone: tzinfo = ZoneInfo("America/New_York"),
+    minutes_before_kickoff: int = 5,
+) -> HtmlEmail:
+    """Render an HTML counterpart to the plain-text kickoff-window alert."""
+
+    kickoff_label, subject = _email_header(
+        kickoff,
+        display_timezone,
+        minutes_before_kickoff,
+    )
+    options_by_starter = _index_replacement_options(replacement_options)
+    sections = (
+        (FantasyAlertSeverity.CRITICAL, "ACTION NEEDED", "#b91c1c"),
+        (FantasyAlertSeverity.WARNING, "RISK", "#b45309"),
+        (FantasyAlertSeverity.INFO, "BENCH NOTES", "#1d4ed8"),
+        (FantasyAlertSeverity.NORMAL, "NO ACTION", "#15803d"),
+    )
+    rendered_sections = [
+        section
+        for severity, heading, color in sections
+        if (
+            section := _render_html_severity_section(
+                severity,
+                heading,
+                color,
+                leagues,
+                options_by_starter,
+            )
+        )
+    ]
+    content = "".join(rendered_sections)
+    return HtmlEmail(
+        subject=subject,
+        body=(
+            '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width, initial-scale=1">'
+            f"<title>{escape(subject)}</title></head>"
+            '<body style="margin:0;background:#f3f4f6;color:#111827;'
+            'font-family:Arial,sans-serif">'
+            '<main style="max-width:680px;margin:0 auto;padding:24px 16px">'
+            '<div style="background:#ffffff;border:1px solid #e5e7eb;'
+            'border-radius:10px;padding:24px">'
+            f'<h1 style="font-size:24px;margin:0 0 24px">{escape(kickoff_label)} GAMES</h1>'
+            f"{content}</div></main></body></html>"
+        ),
+    )
+
+
+def _email_header(
+    kickoff: datetime,
+    display_timezone: tzinfo,
+    minutes_before_kickoff: int,
+) -> tuple[str, str]:
+    if kickoff.tzinfo is None or kickoff.utcoffset() is None:
+        raise ValueError("kickoff must be timezone-aware")
+    if minutes_before_kickoff < 0:
+        raise ValueError("minutes_before_kickoff must be at least 0")
+
+    local_kickoff = kickoff.astimezone(display_timezone)
+    kickoff_label = local_kickoff.strftime("%I:%M %p %Z").lstrip("0")
+    subject = f"Fantasy Check — {kickoff_label} kickoff in {minutes_before_kickoff} min"
+    return kickoff_label, subject
 
 
 def _render_severity_section(
@@ -99,6 +174,81 @@ def _render_severity_section(
         ]
         league_blocks.append("\n\n".join((label, *player_blocks)))
     return "\n\n".join(league_blocks)
+
+
+def _render_html_severity_section(
+    severity: FantasyAlertSeverity,
+    heading: str,
+    color: str,
+    leagues: Sequence[FantasyLeagueStatuses],
+    options_by_starter: Mapping[tuple[str, str], StarterReplacementOptions],
+) -> str:
+    league_blocks: list[str] = []
+    for league_statuses in leagues:
+        players = tuple(
+            item
+            for item in league_statuses.players
+            if item.severity is severity
+            and (item.player.is_starter or severity is not FantasyAlertSeverity.NORMAL)
+        )
+        if not players:
+            continue
+        label = (
+            f"{league_statuses.league.nickname} — "
+            f"{league_statuses.league.platform.value.title()}"
+        )
+        player_blocks = "".join(
+            _render_html_player(
+                player_status,
+                options_by_starter.get(_starter_key(player_status)),
+            )
+            for player_status in players
+        )
+        league_blocks.append(
+            '<section style="margin:0 0 20px">'
+            f'<h3 style="font-size:16px;margin:0 0 8px">{escape(label)}</h3>'
+            f"{player_blocks}</section>"
+        )
+    if not league_blocks:
+        return ""
+    return (
+        '<section style="margin:0 0 28px">'
+        f'<h2 style="color:{color};font-size:18px;margin:0 0 14px">{heading}</h2>'
+        f"{''.join(league_blocks)}</section>"
+    )
+
+
+def _render_html_player(
+    player_status: LeaguePlayerStatus,
+    replacements: StarterReplacementOptions | None,
+) -> str:
+    player = player_status.player
+    lineup_state = "STARTING" if player.is_starter else "BENCH"
+    position = f" ({player.position})" if player.position else ""
+    statuses = "".join(f"<li>{escape(line)}</li>" for line in _status_lines(player_status))
+    replacements_html = ""
+    if replacements is not None:
+        if replacements.candidates:
+            candidates = "".join(
+                f"<li>{escape(_render_candidate(candidate))}</li>"
+                for candidate in replacements.candidates
+            )
+            replacements_html = (
+                '<p style="font-weight:bold;margin:12px 0 6px">Suggested replacements:</p>'
+                f'<ol style="margin:0;padding-left:24px">{candidates}</ol>'
+            )
+        else:
+            replacements_html = (
+                '<p style="font-weight:bold;margin:12px 0 6px">Suggested replacements:</p>'
+                '<p style="margin:0">None verified and unlocked.</p>'
+            )
+    return (
+        '<article style="border-left:4px solid #d1d5db;margin:0 0 12px;padding:8px 12px">'
+        f'<p style="font-weight:bold;margin:0 0 6px">{escape(player.name)} — '
+        f"{lineup_state}{escape(position)}</p>"
+        f'<ul style="margin:0;padding-left:20px">{statuses}</ul>'
+        f"{replacements_html}</article>"
+    )
 
 
 def _render_player(

@@ -22,7 +22,7 @@ from app.models import (
     OpportunityLevel,
     RosterEligibility,
 )
-from app.notification import build_text_email
+from app.notification import build_html_email, build_text_email
 
 
 KICKOFF = datetime(2026, 9, 6, 17, 0, tzinfo=timezone.utc)
@@ -233,3 +233,66 @@ def test_rejects_duplicate_replacement_options_for_one_starter() -> None:
 
     with pytest.raises(ValueError, match="duplicate replacement options"):
         build_text_email(KICKOFF, (statuses,), (options, options))
+
+
+def test_builds_html_email_with_matching_sections_and_replacements() -> None:
+    sleeper = _league("sleeper", "Friends", FantasyPlatform.SLEEPER)
+    espn = _league("espn", "Main", FantasyPlatform.ESPN)
+    inactive = _player(sleeper, "inactive", "Unavailable Starter", starter=True)
+    replacement = _player(sleeper, "replacement", "Healthy Backup", starter=False)
+    risky = _player(espn, "risky", "Risky Starter", starter=True)
+    healthy_bench = _player(espn, "healthy-bench", "Healthy Bench", starter=False)
+    sleeper_statuses = _league_statuses(
+        sleeper,
+        (
+            (inactive, _status("inactive", game_day=GameDayState.INACTIVE)),
+            (replacement, _status("replacement")),
+        ),
+    )
+    espn_statuses = _league_statuses(
+        espn,
+        (
+            (risky, _status("risky", designation=InjuryDesignation.QUESTIONABLE)),
+            (healthy_bench, _status("healthy-bench")),
+        ),
+    )
+    options = StarterReplacementOptions(
+        sleeper_statuses.players[0],
+        (ReplacementCandidate(sleeper_statuses.players[1]),),
+    )
+
+    email = build_html_email(
+        KICKOFF,
+        (sleeper_statuses, espn_statuses),
+        (options,),
+    )
+
+    assert email.subject == "Fantasy Check — 1:00 PM EDT kickoff in 5 min"
+    assert email.body.startswith("<!doctype html>")
+    assert email.body.index("ACTION NEEDED") < email.body.index("RISK")
+    assert "Friends — Sleeper" in email.body
+    assert "Unavailable Starter — STARTING (RB)" in email.body
+    assert "<li>OFFICIALLY INACTIVE</li>" in email.body
+    assert "<li>Healthy Backup — RB — NE — Active</li>" in email.body
+    assert "Risky Starter — STARTING (RB)" in email.body
+    assert "Healthy Bench" not in email.body
+
+
+def test_html_email_escapes_dynamic_content_and_labels_unknown_status() -> None:
+    league = _league("league", "Friends & <Family>", FantasyPlatform.SLEEPER)
+    player = _player(league, "missing", "A & B <script>", starter=True)
+    statuses = _league_statuses(league, ((player, None),))
+
+    email = build_html_email(KICKOFF, (statuses,))
+
+    assert "Friends &amp; &lt;Family&gt; — Sleeper" in email.body
+    assert "A &amp; B &lt;script&gt; — STARTING (RB)" in email.body
+    assert "<script>" not in email.body
+    assert "<li>STATUS UNKNOWN — NFL status unavailable</li>" in email.body
+
+
+def test_html_email_uses_shared_input_validation() -> None:
+    with pytest.raises(ValueError, match="kickoff must be timezone-aware"):
+        build_html_email(KICKOFF.replace(tzinfo=None), ())
+    with pytest.raises(ValueError, match="minutes_before_kickoff"):
+        build_html_email(KICKOFF, (), minutes_before_kickoff=-1)
