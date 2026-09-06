@@ -30,6 +30,7 @@ from app.nfl import (
     PlayerIdentityResolver,
     SleeperStatusSource,
     assign_next_games,
+    build_owned_depth_relations,
     group_kickoff_windows,
     join_owned_skill_players,
     map_rosters_to_nfl,
@@ -44,6 +45,7 @@ from app.nfl import (
     render_next_games,
     render_nflverse_status_report,
     render_owned_depth_join,
+    render_owned_depth_relations,
     render_roster_mapping,
     render_sleeper_status_report,
     render_team_status_report,
@@ -235,7 +237,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     owned_depth = subparsers.add_parser(
         "owned-depth",
-        description="Join owned QB/RB/WR/TE players to a depth snapshot by GSIS or ESPN ID",
+        description="Join owned skill players and list every teammate ahead in the same depth slot",
     )
     owned_depth.add_argument("--config", type=Path, default=Path("config.yaml"))
     owned_depth.add_argument("--env-file", type=Path, default=Path(".env"))
@@ -539,13 +541,18 @@ def _owned_depth(args: argparse.Namespace) -> int:
         depth_snapshot,
         identities=resolver.identities,
     )
+    relations = build_owned_depth_relations(result)
     print(render_depth_snapshot(depth_snapshot))
     print(render_owned_depth_join(result))
+    print(render_owned_depth_relations(relations))
     data_errors = {
         "not_in_snapshot",
         "ambiguous_depth_id",
     }
-    return 1 if any(issue.state.value in data_errors for issue in result.issues) else 0
+    return 1 if (
+        any(issue.state.value in data_errors for issue in result.issues)
+        or bool(relations.issues)
+    ) else 0
 
 
 def _depth_chart_settings(args: argparse.Namespace) -> tuple[int, int]:
