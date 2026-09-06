@@ -45,6 +45,11 @@ from app.analysis.opportunity import (
     render_depth_opportunities,
     render_depth_opportunity_analysis,
 )
+from app.analysis.replacements import (
+    ReplacementCandidate,
+    StarterReplacementOptions,
+    find_valid_bench_substitutes,
+)
 
 __all__ = [
     "DepthOpportunityAnalysis",
@@ -63,6 +68,8 @@ __all__ = [
     "OpportunityLimitationState",
     "RosterSlotKind",
     "RosterSlotRule",
+    "ReplacementCandidate",
+    "StarterReplacementOptions",
     "StatusScope",
     "StatusScopeIssue",
     "StatusScopeIssueState",
@@ -73,6 +80,7 @@ __all__ = [
     "degrade_cached_confidence",
     "detect_depth_opportunities",
     "determine_fantasy_severity",
+    "find_valid_bench_substitutes",
     "map_nfl_statuses_to_fantasy_leagues",
     "parse_league_roster_eligibility",
     "render_player_statuses",
