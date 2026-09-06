@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Mapping, Sequence
 
 from app.analysis.eligibility import LeagueRosterEligibility
@@ -37,18 +38,18 @@ def find_valid_bench_substitutes(
     league_statuses: FantasyLeagueStatuses,
     eligibility: LeagueRosterEligibility,
     opportunities: Sequence[DepthOpportunity] = (),
+    *,
+    kickoffs_by_canonical_player_id: Mapping[str, datetime],
+    decision_at: datetime,
 ) -> tuple[StarterReplacementOptions, ...]:
-    """Return ranked, verified substitutes for each critical or warning starter.
-
-    This milestone deliberately does not evaluate kickoff locks. Callers must apply
-    game-start exclusion before presenting these candidates as actionable.
-    """
+    """Return ranked, verified, unlocked substitutes for affected starters."""
 
     if (
         eligibility.league_id != league_statuses.league.id
         or eligibility.platform is not league_statuses.league.platform
     ):
         raise ValueError("roster eligibility does not belong to the supplied league")
+    _validate_kickoff_times(kickoffs_by_canonical_player_id, decision_at)
 
     opportunities_by_id = _index_opportunities(opportunities)
     options: list[StarterReplacementOptions] = []
@@ -75,6 +76,11 @@ def find_valid_bench_substitutes(
                 starter.player.lineup_slot,
             )
             and _is_verified_available(bench_player)
+            and _is_unlocked(
+                bench_player,
+                kickoffs_by_canonical_player_id,
+                decision_at,
+            )
         ]
         candidates.sort(key=_candidate_rank)
         options.append(StarterReplacementOptions(starter, tuple(candidates)))
@@ -90,6 +96,31 @@ def _is_verified_available(candidate: LeaguePlayerStatus) -> bool:
         and status.injury_designation
         in {InjuryDesignation.NONE, InjuryDesignation.QUESTIONABLE}
     )
+
+
+def _is_unlocked(
+    candidate: LeaguePlayerStatus,
+    kickoffs_by_canonical_player_id: Mapping[str, datetime],
+    decision_at: datetime,
+) -> bool:
+    canonical_id = candidate.player.canonical_player_id
+    if not canonical_id:
+        return False
+    kickoff = kickoffs_by_canonical_player_id.get(canonical_id)
+    return kickoff is not None and kickoff > decision_at
+
+
+def _validate_kickoff_times(
+    kickoffs_by_canonical_player_id: Mapping[str, datetime],
+    decision_at: datetime,
+) -> None:
+    if decision_at.tzinfo is None or decision_at.utcoffset() is None:
+        raise ValueError("decision_at must be timezone-aware")
+    for canonical_id, kickoff in kickoffs_by_canonical_player_id.items():
+        if kickoff.tzinfo is None or kickoff.utcoffset() is None:
+            raise ValueError(
+                f"kickoff for canonical player {canonical_id!r} must be timezone-aware"
+            )
 
 
 def _index_opportunities(

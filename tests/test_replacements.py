@@ -25,6 +25,7 @@ from app.models import (
 
 
 NOW = datetime(2026, 9, 6, 16, 55, tzinfo=timezone.utc)
+FUTURE_KICKOFF = datetime(2026, 9, 6, 17, 0, tzinfo=timezone.utc)
 
 
 def _league(
@@ -121,6 +122,14 @@ def _opportunity(player_id: str, level: OpportunityLevel) -> DepthOpportunity:
     )
 
 
+def _kickoffs(*statuses: LeaguePlayerStatus) -> dict[str, datetime]:
+    return {
+        status.player.canonical_player_id: FUTURE_KICKOFF
+        for status in statuses
+        if status.player.canonical_player_id
+    }
+
+
 def test_finds_only_same_league_eligible_verified_bench_players() -> None:
     league = _league()
     starter = _player(
@@ -177,6 +186,8 @@ def test_finds_only_same_league_eligible_verified_bench_players() -> None:
     options = find_valid_bench_substitutes(
         statuses,
         parse_league_roster_eligibility(league),
+        kickoffs_by_canonical_player_id=_kickoffs(*statuses.bench),
+        decision_at=NOW,
     )
 
     assert len(options) == 1
@@ -211,6 +222,8 @@ def test_questionable_active_candidate_ranks_below_healthy_before_opportunity() 
         statuses,
         parse_league_roster_eligibility(league),
         (_opportunity("questionable", OpportunityLevel.PROMOTED),),
+        kickoffs_by_canonical_player_id=_kickoffs(*statuses.bench),
+        decision_at=NOW,
     )
 
     assert [candidate.player_status.player for candidate in options[0].candidates] == [
@@ -247,6 +260,8 @@ def test_confidence_then_opportunity_provide_deterministic_bounded_ranking() -> 
         statuses,
         parse_league_roster_eligibility(league),
         (_opportunity("promoted", OpportunityLevel.PROMOTED),),
+        kickoffs_by_canonical_player_id=_kickoffs(*statuses.bench),
+        decision_at=NOW,
     )
 
     assert [candidate.player_status.player for candidate in options[0].candidates] == [
@@ -273,6 +288,8 @@ def test_normal_starters_are_not_given_replacement_options() -> None:
     assert find_valid_bench_substitutes(
         statuses,
         parse_league_roster_eligibility(league),
+        kickoffs_by_canonical_player_id=_kickoffs(*statuses.bench),
+        decision_at=NOW,
     ) == ()
 
 
@@ -299,6 +316,8 @@ def test_espn_uses_exact_slot_id_eligibility_and_rejects_wrong_rules() -> None:
     options = find_valid_bench_substitutes(
         statuses,
         parse_league_roster_eligibility(league),
+        kickoffs_by_canonical_player_id=_kickoffs(*statuses.bench),
+        decision_at=NOW,
     )
     assert [candidate.player_status.player for candidate in options[0].candidates] == [
         running_back
@@ -306,4 +325,102 @@ def test_espn_uses_exact_slot_id_eligibility_and_rejects_wrong_rules() -> None:
 
     other_rules = parse_league_roster_eligibility(replace(league, id="other"))
     with pytest.raises(ValueError, match="does not belong"):
-        find_valid_bench_substitutes(statuses, other_rules)
+        find_valid_bench_substitutes(
+            statuses,
+            other_rules,
+            kickoffs_by_canonical_player_id=_kickoffs(*statuses.bench),
+            decision_at=NOW,
+        )
+
+
+def test_excludes_started_and_exactly_kicking_off_candidates() -> None:
+    league = _league()
+    starter = _player(
+        league, "starter", starter=True, lineup_slot="RB", eligible_slots=("RB",)
+    )
+    started = _player(
+        league, "started", starter=False, lineup_slot="BN", eligible_slots=("RB",)
+    )
+    kicking_off = _player(
+        league, "kicking-off", starter=False, lineup_slot="BN", eligible_slots=("RB",)
+    )
+    future = _player(
+        league, "future", starter=False, lineup_slot="BN", eligible_slots=("RB",)
+    )
+    statuses = _league_statuses(
+        league,
+        tuple(
+            (
+                player,
+                _status(
+                    player.canonical_player_id or "",
+                    game_day=(
+                        GameDayState.INACTIVE
+                        if player is starter
+                        else GameDayState.ACTIVE
+                    ),
+                ),
+            )
+            for player in (starter, started, kicking_off, future)
+        ),
+    )
+
+    options = find_valid_bench_substitutes(
+        statuses,
+        parse_league_roster_eligibility(league),
+        kickoffs_by_canonical_player_id={
+            "started": datetime(2026, 9, 6, 16, 0, tzinfo=timezone.utc),
+            "kicking-off": NOW,
+            "future": FUTURE_KICKOFF,
+        },
+        decision_at=NOW,
+    )
+
+    assert [candidate.player_status.player for candidate in options[0].candidates] == [future]
+
+
+def test_excludes_candidate_without_a_confirmed_kickoff() -> None:
+    league = _league()
+    starter = _player(
+        league, "starter", starter=True, lineup_slot="RB", eligible_slots=("RB",)
+    )
+    no_game = _player(
+        league, "no-game", starter=False, lineup_slot="BN", eligible_slots=("RB",)
+    )
+    statuses = _league_statuses(
+        league,
+        (
+            (starter, _status("starter", game_day=GameDayState.INACTIVE)),
+            (no_game, _status("no-game")),
+        ),
+    )
+
+    options = find_valid_bench_substitutes(
+        statuses,
+        parse_league_roster_eligibility(league),
+        kickoffs_by_canonical_player_id={},
+        decision_at=NOW,
+    )
+
+    assert options[0].candidates == ()
+
+
+def test_requires_timezone_aware_decision_and_kickoff_times() -> None:
+    league = _league()
+    statuses = _league_statuses(league, ())
+    eligibility = parse_league_roster_eligibility(league)
+
+    with pytest.raises(ValueError, match="decision_at must be timezone-aware"):
+        find_valid_bench_substitutes(
+            statuses,
+            eligibility,
+            kickoffs_by_canonical_player_id={},
+            decision_at=NOW.replace(tzinfo=None),
+        )
+    with pytest.raises(ValueError, match="kickoff.*must be timezone-aware"):
+        find_valid_bench_substitutes(
+            statuses,
+            eligibility,
+            kickoffs_by_canonical_player_id={"player": FUTURE_KICKOFF.replace(tzinfo=None)},
+            decision_at=NOW,
+        )
