@@ -74,6 +74,10 @@ def build_text_email(
         if rendered_leagues:
             lines.extend(("", heading, "", rendered_leagues))
 
+    league_summary = _render_league_summary(leagues)
+    if league_summary:
+        lines.extend(("", "LEAGUE SUMMARY", "", league_summary))
+
     return TextEmail(subject=subject, body="\n".join(lines))
 
 
@@ -113,6 +117,7 @@ def build_html_email(
         )
     ]
     content = "".join(rendered_sections)
+    league_summary = _render_html_league_summary(leagues)
     return HtmlEmail(
         subject=subject,
         body=(
@@ -125,7 +130,7 @@ def build_html_email(
             '<div style="background:#ffffff;border:1px solid #e5e7eb;'
             'border-radius:10px;padding:24px">'
             f'<h1 style="font-size:24px;margin:0 0 24px">{escape(kickoff_label)} GAMES</h1>'
-            f"{content}</div></main></body></html>"
+            f"{content}{league_summary}</div></main></body></html>"
         ),
     )
 
@@ -216,6 +221,56 @@ def _render_html_severity_section(
         f'<h2 style="color:{color};font-size:18px;margin:0 0 14px">{heading}</h2>'
         f"{''.join(league_blocks)}</section>"
     )
+
+
+def _render_league_summary(leagues: Sequence[FantasyLeagueStatuses]) -> str:
+    return "\n\n".join(
+        "\n".join((league_statuses.league.nickname, *_league_summary_lines(league_statuses)))
+        for league_statuses in leagues
+    )
+
+
+def _render_html_league_summary(leagues: Sequence[FantasyLeagueStatuses]) -> str:
+    if not leagues:
+        return ""
+    summaries = "".join(
+        '<section style="margin:0 0 14px">'
+        f'<h3 style="font-size:16px;margin:0 0 6px">'
+        f"{escape(league_statuses.league.nickname)}</h3>"
+        '<ul style="margin:0;padding-left:20px">'
+        + "".join(
+            f"<li>{escape(line)}</li>" for line in _league_summary_lines(league_statuses)
+        )
+        + "</ul></section>"
+        for league_statuses in leagues
+    )
+    return (
+        '<section style="margin:0">'
+        '<h2 style="font-size:18px;margin:0 0 14px">LEAGUE SUMMARY</h2>'
+        f"{summaries}</section>"
+    )
+
+
+def _league_summary_lines(league_statuses: FantasyLeagueStatuses) -> tuple[str, ...]:
+    critical_count = sum(
+        item.player.is_starter and item.severity is FantasyAlertSeverity.CRITICAL
+        for item in league_statuses.players
+    )
+    warning_count = sum(
+        item.player.is_starter and item.severity is FantasyAlertSeverity.WARNING
+        for item in league_statuses.players
+    )
+    if critical_count == 0 and warning_count == 0:
+        return ("No starter issues",)
+    return (
+        _count_label(critical_count, "lineup issue"),
+        _count_label(warning_count, "warning"),
+    )
+
+
+def _count_label(count: int, singular: str) -> str:
+    suffix = "" if count == 1 else "s"
+    return f"{count} {singular}{suffix}"
 
 
 def _render_html_player(

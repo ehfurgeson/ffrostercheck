@@ -163,6 +163,11 @@ def test_builds_one_text_email_grouped_by_urgency_then_league() -> None:
     assert "Risky Starter — STARTING (RB)\nActive\nQuestionable — ankle" in email.body
     assert "Healthy Starter — STARTING (WR)\nActive" in email.body
     assert "Healthy Bench" not in email.body
+    assert email.body.endswith(
+        "LEAGUE SUMMARY\n\n"
+        "Friends\n1 lineup issue\n0 warnings\n\n"
+        "Main\n0 lineup issues\n1 warning"
+    )
 
 
 def test_renders_abnormal_bench_status_as_information() -> None:
@@ -276,6 +281,29 @@ def test_builds_html_email_with_matching_sections_and_replacements() -> None:
     assert "<li>Healthy Backup — RB — NE — Active</li>" in email.body
     assert "Risky Starter — STARTING (RB)" in email.body
     assert "Healthy Bench" not in email.body
+    assert email.body.index("RISK") < email.body.index("LEAGUE SUMMARY")
+    assert "<h3 style=\"font-size:16px;margin:0 0 6px\">Friends</h3>" in email.body
+    assert "<li>1 lineup issue</li><li>0 warnings</li>" in email.body
+    assert "<li>0 lineup issues</li><li>1 warning</li>" in email.body
+
+
+def test_league_summary_marks_clear_leagues_and_ignores_bench_issues() -> None:
+    league = _league("league", "Dynasty", FantasyPlatform.SLEEPER)
+    healthy_starter = _player(league, "starter", "Healthy Starter", starter=True)
+    unavailable_bench = _player(league, "bench", "Unavailable Bench", starter=False)
+    statuses = _league_statuses(
+        league,
+        (
+            (healthy_starter, _status("starter")),
+            (unavailable_bench, _status("bench", game_day=GameDayState.INACTIVE)),
+        ),
+    )
+
+    text_email = build_text_email(KICKOFF, (statuses,))
+    html_email = build_html_email(KICKOFF, (statuses,))
+
+    assert text_email.body.endswith("LEAGUE SUMMARY\n\nDynasty\nNo starter issues")
+    assert "<li>No starter issues</li>" in html_email.body
 
 
 def test_html_email_escapes_dynamic_content_and_labels_unknown_status() -> None:
