@@ -1,6 +1,12 @@
 from datetime import datetime, timezone
 
-from app.analysis import detect_depth_opportunities, render_depth_opportunities
+from app.analysis import (
+    OpportunityLimitationState,
+    analyze_depth_opportunities,
+    detect_depth_opportunities,
+    render_depth_opportunities,
+    render_depth_opportunity_analysis,
+)
 from app.models import (
     Confidence,
     FantasyPlatform,
@@ -46,7 +52,7 @@ def _row(
     canonical_id: str | None,
     rank: int,
     *,
-    slot: int = 1,
+    slot: int | None = 1,
     position: str = "RB",
     formation: str = "11 personnel",
 ) -> DepthChartRow:
@@ -71,6 +77,23 @@ def _relations(players: tuple[FantasyPlayer, ...], *rows: DepthChartRow):
         max_age_hours=30,
         snapshot_at=SNAPSHOT_AT,
         rows=rows,
+    )
+    return build_owned_depth_relations(join_owned_skill_players(players, snapshot))
+
+
+def _relations_with_state(
+    state: DepthSnapshotState,
+    players: tuple[FantasyPlayer, ...],
+    *rows: DepthChartRow,
+):
+    snapshot = DepthChartSnapshot(
+        state=state,
+        season=2026,
+        as_of=DECISION_AT,
+        max_age_hours=30,
+        snapshot_at=SNAPSHOT_AT if rows else None,
+        rows=rows,
+        detail=f"fixture snapshot is {state.value}",
     )
     return build_owned_depth_relations(join_owned_skill_players(players, snapshot))
 
@@ -238,3 +261,62 @@ def test_same_slot_signal_wins_over_broad_positional_context() -> None:
     assert opportunity.level is OpportunityLevel.PROMOTED
     assert opportunity.unavailable_player_ids == ("same-slot-starter",)
     assert "order 2 -> 1" in render_depth_opportunities((opportunity,))
+
+
+def test_missing_and_unsupported_snapshots_suppress_opportunity() -> None:
+    expected = {
+        DepthSnapshotState.MISSING: OpportunityLimitationState.MISSING_SNAPSHOT,
+        DepthSnapshotState.UNSUPPORTED_SEASON: OpportunityLimitationState.UNSUPPORTED_SEASON,
+    }
+    for state, limitation_state in expected.items():
+        analysis = analyze_depth_opportunities(
+            _relations_with_state(state, (_owned("owned"),)),
+            (_status("starter", game_day=GameDayState.INACTIVE, source="nfl_inactives"),),
+        )
+
+        assert analysis.opportunities == ()
+        assert analysis.limitations[0].state is limitation_state
+
+
+def test_stale_snapshot_is_diagnostic_only_and_cannot_boost_a_player() -> None:
+    relations = _relations_with_state(
+        DepthSnapshotState.STALE,
+        (_owned("owned"),),
+        _row("starter", 1),
+        _row("owned", 4),
+    )
+
+    analysis = analyze_depth_opportunities(
+        relations,
+        (_status("starter", game_day=GameDayState.INACTIVE, source="nfl_inactives"),),
+    )
+
+    assert analysis.opportunities == ()
+    assert analysis.limitations[0].state is OpportunityLimitationState.STALE_SNAPSHOT
+    assert detect_depth_opportunities(relations, ()) == ()
+
+
+def test_unresolved_blockers_and_incomplete_rows_reach_opportunity_diagnostics() -> None:
+    relations = _relations(
+        (_owned("owned"),),
+        _row(None, 1),
+        _row("official-out", 2),
+        _row("owned", 4),
+        _row("incomplete", 5, slot=None),
+    )
+
+    analysis = analyze_depth_opportunities(
+        relations,
+        (_status("official-out", designation=InjuryDesignation.OUT, source="nfl_injuries"),),
+    )
+
+    assert analysis.opportunities[0].level is OpportunityLevel.ROLE_BOOST
+    assert [limitation.state for limitation in analysis.limitations] == [
+        OpportunityLimitationState.UNRESOLVED_BLOCKER,
+        OpportunityLimitationState.INCOMPLETE_CHAIN_ROW,
+    ]
+    assert analysis.limitations[0].affected_player_ids == ("owned",)
+    rendered = render_depth_opportunity_analysis(analysis)
+    assert "Opportunity limitations: 2" in rendered
+    assert "availability remains unknown; affects owned" in rendered
+    assert "missing required chain fields: position_slot" in rendered

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from enum import Enum
 
 from app.models import (
     Confidence,
@@ -12,11 +14,55 @@ from app.models import (
     NFLPlayerStatus,
     OpportunityLevel,
 )
+from app.nfl.depth_chart import DepthChartRow, DepthSnapshotState
 from app.nfl.depth_relations import DepthSlotChain, OwnedDepthRelations
 
 
 OFFICIAL_INACTIVES_SOURCE = "nfl_inactives"
 OFFICIAL_INJURIES_SOURCE = "nfl_injuries"
+
+
+class OpportunityLimitationState(str, Enum):
+    """A depth-data condition that limits or suppresses opportunity analysis."""
+
+    MISSING_SNAPSHOT = "missing_snapshot"
+    UNSUPPORTED_SEASON = "unsupported_season"
+    STALE_SNAPSHOT = "stale_snapshot"
+    UNRESOLVED_BLOCKER = "unresolved_blocker"
+    INCOMPLETE_CHAIN_ROW = "incomplete_chain_row"
+
+
+@dataclass(frozen=True)
+class OpportunityLimitation:
+    """One explicit limitation and the owned players it can affect."""
+
+    state: OpportunityLimitationState
+    detail: str
+    affected_player_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class DepthOpportunityAnalysis:
+    """Opportunity signals plus depth-data limitations from the same decision."""
+
+    opportunities: tuple[DepthOpportunity, ...]
+    limitations: tuple[OpportunityLimitation, ...]
+
+
+def analyze_depth_opportunities(
+    relations: OwnedDepthRelations,
+    statuses: Sequence[NFLPlayerStatus],
+) -> DepthOpportunityAnalysis:
+    """Analyze fresh depth data and preserve every material degradation reason."""
+
+    limitations = _opportunity_limitations(relations)
+    snapshot = relations.snapshot
+    if snapshot.state is not DepthSnapshotState.AVAILABLE:
+        return DepthOpportunityAnalysis((), limitations)
+    return DepthOpportunityAnalysis(
+        _detect_fresh_depth_opportunities(relations, statuses),
+        limitations,
+    )
 
 
 def detect_depth_opportunities(
@@ -25,10 +71,18 @@ def detect_depth_opportunities(
 ) -> tuple[DepthOpportunity, ...]:
     """Return the strongest supported opportunity signal for each owned player.
 
-    Only explicit official inactive or Out evidence removes a player from a depth
-    chain. Unknown, questionable, doubtful, and fallback-only states remain ahead.
+    Only a fresh snapshot is analyzed, and only explicit official inactive or Out
+    evidence removes a player from a depth chain. Unknown, questionable, doubtful,
+    and fallback-only states remain ahead.
     """
 
+    return analyze_depth_opportunities(relations, statuses).opportunities
+
+
+def _detect_fresh_depth_opportunities(
+    relations: OwnedDepthRelations,
+    statuses: Sequence[NFLPlayerStatus],
+) -> tuple[DepthOpportunity, ...]:
     statuses_by_id = {status.canonical_player_id: status for status in statuses}
     opportunities: list[DepthOpportunity] = []
     for beneficiary_id, relation in relations.relations.items():
@@ -89,6 +143,21 @@ def detect_depth_opportunities(
     return tuple(opportunities)
 
 
+def render_depth_opportunity_analysis(analysis: DepthOpportunityAnalysis) -> str:
+    """Render signals and limitations without implying degraded data is current."""
+
+    lines = [render_depth_opportunities(analysis.opportunities)]
+    lines.append(f"Opportunity limitations: {len(analysis.limitations)}")
+    for limitation in analysis.limitations:
+        affected = (
+            f"; affects {', '.join(limitation.affected_player_ids)}"
+            if limitation.affected_player_ids
+            else ""
+        )
+        lines.append(f"  {limitation.state.value}: {limitation.detail}{affected}")
+    return "\n".join(lines)
+
+
 def render_depth_opportunities(opportunities: Sequence[DepthOpportunity]) -> str:
     """Render deterministic opportunity diagnostics without workload claims."""
 
@@ -102,6 +171,60 @@ def render_depth_opportunities(opportunities: Sequence[DepthOpportunity]) -> str
             f"confidence={opportunity.confidence.name.lower()}"
         )
     return "\n".join(lines)
+
+
+def _opportunity_limitations(
+    relations: OwnedDepthRelations,
+) -> tuple[OpportunityLimitation, ...]:
+    snapshot = relations.snapshot
+    limitations: list[OpportunityLimitation] = []
+    if snapshot.state is DepthSnapshotState.MISSING:
+        limitations.append(
+            OpportunityLimitation(
+                OpportunityLimitationState.MISSING_SNAPSHOT,
+                snapshot.detail or "no depth snapshot is available",
+                tuple(relations.relations),
+            )
+        )
+    elif snapshot.state is DepthSnapshotState.UNSUPPORTED_SEASON:
+        limitations.append(
+            OpportunityLimitation(
+                OpportunityLimitationState.UNSUPPORTED_SEASON,
+                snapshot.detail or f"depth charts do not support season {snapshot.season}",
+                tuple(relations.relations),
+            )
+        )
+    elif snapshot.state is DepthSnapshotState.STALE:
+        limitations.append(
+            OpportunityLimitation(
+                OpportunityLimitationState.STALE_SNAPSHOT,
+                snapshot.detail or "depth snapshot exceeds its configured maximum age",
+                tuple(relations.relations),
+            )
+        )
+
+    unresolved: dict[DepthChartRow, list[str]] = {}
+    for beneficiary_id, relation in relations.relations.items():
+        for blocker in relation.players_ahead:
+            if blocker.canonical_player_id is None:
+                unresolved.setdefault(blocker.depth_row, []).append(beneficiary_id)
+    for row, affected_ids in unresolved.items():
+        limitations.append(
+            OpportunityLimitation(
+                OpportunityLimitationState.UNRESOLVED_BLOCKER,
+                f"{row.player_name} has no canonical ID; availability remains unknown",
+                tuple(dict.fromkeys(affected_ids)),
+            )
+        )
+
+    for issue in relations.issues:
+        limitations.append(
+            OpportunityLimitation(
+                OpportunityLimitationState.INCOMPLETE_CHAIN_ROW,
+                f"{issue.depth_row.player_name}: {issue.detail}",
+            )
+        )
+    return tuple(limitations)
 
 
 def _unavailable_other_slot_starters(
