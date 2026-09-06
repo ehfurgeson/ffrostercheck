@@ -277,3 +277,27 @@ def test_degraded_official_reports_consult_fallback_sources(tmp_path: Path) -> N
     assert fallback_calls == 1
     assert any(report.source == "sleeper_status" for report in execution.source_reports)
     assert "Sleeper status fallback: COMPLETE" in execution.text_email.body
+
+
+def test_complete_official_reports_still_consult_roster_eligibility_source(
+    tmp_path: Path,
+) -> None:
+    fallback_calls = 0
+
+    def fallback(_game):
+        nonlocal fallback_calls
+        fallback_calls += 1
+        return (_report("sleeper_status", inactive_id=None),)
+
+    execute_final_job(
+        _job(),
+        cache=StatusCache(tmp_path),
+        refresh_lineups=_snapshot,
+        fetch_official_reports=lambda _game: _official_reports(),
+        fetch_fallback_reports=fallback,
+        notifier=RecordingNotifier(),
+        decision_at=DECISION_AT,
+        display_timezone=timezone.utc,
+    )
+
+    assert fallback_calls == 1

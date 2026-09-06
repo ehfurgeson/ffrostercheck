@@ -124,9 +124,7 @@ def execute_final_job(
             )
         resolutions.append(resolution)
         game_reports = list(resolution.reports)
-        if fetch_fallback_reports is not None and (
-            not resolution.origin_fresh or not _official_reports_complete(game_reports)
-        ):
+        if fetch_fallback_reports is not None:
             try:
                 fallback_reports = _validated_reports(
                     game,

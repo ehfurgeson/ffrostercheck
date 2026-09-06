@@ -1,0 +1,23 @@
+[Unit]
+Description=Fantasy Watchdog NFL game-day alerts
+Documentation=https://github.com/ehfurgeson/ffrostercheck
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+TimeoutStartSec=infinity
+TimeoutStopSec=30s
+User=fantasy-watchdog
+Group=fantasy-watchdog
+WorkingDirectory=/opt/fantasy-watchdog
+EnvironmentFile=/etc/fantasy-watchdog/environment
+ExecStart=/opt/fantasy-watchdog/.venv/bin/fantasy-watchdog run-game-day --config /etc/fantasy-watchdog/config.yaml --env-file /etc/fantasy-watchdog/environment --cache-dir /var/lib/fantasy-watchdog/cache
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/fantasy-watchdog
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

@@ -188,6 +188,9 @@ class SleeperStatusSource:
         metadata = self._client.response_metadata.get(CATALOG_PATH)
         retrieved_at = metadata.retrieved_at if metadata else datetime.now(timezone.utc)
         cache_age = metadata.cache_age_seconds if metadata else None
+        self._catalog = catalog
+        self._injected_retrieved_at = retrieved_at
+        self._injected_cache_age = cache_age
         return catalog, retrieved_at, cache_age
 
 

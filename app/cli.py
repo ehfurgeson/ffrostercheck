@@ -58,7 +58,13 @@ from app.storage.cache import (
     render_cached_snapshot,
     render_status_resolution,
 )
-from app.scheduling import build_game_day_plan, render_game_day_plan
+from app.scheduling import (
+    ProductionServiceError,
+    build_game_day_plan,
+    render_game_day_plan,
+    render_game_day_service,
+    run_production_game_day,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -111,6 +117,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--game-date",
         help="Local game date in YYYY-MM-DD; defaults to the planning date",
     )
+    run_game_day = subparsers.add_parser(
+        "run-game-day",
+        description="Plan and execute today's prefetch and final jobs in one supervised process",
+    )
+    run_game_day.add_argument("--config", type=Path, default=Path("config.yaml"))
+    run_game_day.add_argument("--env-file", type=Path, default=Path(".env"))
+    run_game_day.add_argument("--cache-dir", type=Path, default=Path("cache"))
     inactives = subparsers.add_parser(
         "nfl-inactives",
         description="Parse official NFL.com inactives without inferring active from absence",
@@ -292,6 +305,8 @@ def main(argv: list[str] | None = None) -> int:
             return _kickoff_windows(args.config, args.env_file)
         if args.command == "plan-game-day":
             return _plan_game_day(args)
+        if args.command == "run-game-day":
+            return _run_game_day(args)
         if args.command == "nfl-inactives":
             return _nfl_inactives(args)
         if args.command == "nfl-injuries":
@@ -317,6 +332,7 @@ def main(argv: list[str] | None = None) -> int:
         FantasyManagerError,
         NFLVerseLoadError,
         StatusCacheError,
+        ProductionServiceError,
     ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -438,6 +454,16 @@ def _plan_game_day(args: argparse.Namespace) -> int:
         print("Depth planning: disabled")
 
     return 1 if mapping.unresolved or assignments.data_errors else 0
+
+
+def _run_game_day(args: argparse.Namespace) -> int:
+    result = run_production_game_day(
+        config_path=args.config,
+        env_file=args.env_file,
+        cache_dir=args.cache_dir,
+    )
+    print(render_game_day_service(result))
+    return 1 if result.failed else 0
 
 
 def _assigned_next_games(config_path: Path, env_file: Path):

@@ -154,6 +154,7 @@ class NFLVerseStatusSource:
         if dataset is None:
             loader = self._nflverse or NFLVerseSource()
             dataset = loader.load_injuries(self.season)
+            self._dataset = dataset
         if dataset.state is not DatasetState.AVAILABLE or dataset.frame is None:
             return None, retrieved_at, dataset.detail
         return tuple(dataset.frame.iter_rows(named=True)), retrieved_at, dataset.detail

@@ -1,0 +1,12 @@
+[Unit]
+Description=Start Fantasy Watchdog on NFL game days
+
+[Timer]
+# The service exits after the day's final relevant kickoff job. Starting daily
+# is harmless on non-game days and avoids brittle hard-coded weekday assumptions.
+OnCalendar=*-*-* 07:00:00 America/New_York
+Persistent=true
+Unit=fantasy-watchdog.service
+
+[Install]
+WantedBy=timers.target

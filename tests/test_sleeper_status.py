@@ -139,7 +139,11 @@ def test_missing_team_is_partial_and_failed_http_is_failed() -> None:
 
 
 def test_http_catalog_records_cache_age() -> None:
+    calls = 0
+
     def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
         assert request.url.path.endswith("/players/nfl")
         return httpx.Response(
             200,
@@ -153,8 +157,12 @@ def test_http_catalog_records_cache_age() -> None:
             transport=httpx.MockTransport(handler),
         )
     )
-    report = SleeperStatusSource(client=client).fetch_game(_game())
+    source = SleeperStatusSource(client=client)
+    report = source.fetch_game(_game())
+    second = source.fetch_game(_game())
 
     assert report.report_state is ReportState.COMPLETE
+    assert second.report_state is ReportState.COMPLETE
     assert report.http_cache_age_seconds == 77
     assert report.raw_content_hash
+    assert calls == 1
