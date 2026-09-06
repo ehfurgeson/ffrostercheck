@@ -19,10 +19,12 @@ from app.analysis.replacements import (
 from app.models import (
     FantasyAlertSeverity,
     GameDayState,
+    GameSourceReport,
     InjuryDesignation,
     OpportunityLevel,
     RosterEligibility,
 )
+from app.notification.sources import build_source_lines
 from app.notification.timestamps import build_timestamp_lines
 
 
@@ -48,6 +50,7 @@ def build_text_email(
     replacement_options: Sequence[StarterReplacementOptions] = (),
     *,
     decision_at: datetime,
+    source_reports: Sequence[GameSourceReport] = (),
     display_timezone: tzinfo = ZoneInfo("America/New_York"),
     minutes_before_kickoff: int = 5,
 ) -> TextEmail:
@@ -64,7 +67,9 @@ def build_text_email(
         leagues,
         replacement_options,
         display_timezone,
+        source_reports,
     )
+    source_lines = build_source_lines(leagues, source_reports)
     options_by_starter = _index_replacement_options(replacement_options)
     lines = [f"{kickoff_label} GAMES"]
 
@@ -87,6 +92,8 @@ def build_text_email(
     if league_summary:
         lines.extend(("", "LEAGUE SUMMARY", "", league_summary))
 
+    lines.extend(("", "SOURCES AND FAILURES", "", "\n".join(source_lines)))
+
     lines.extend(
         (
             "",
@@ -105,6 +112,7 @@ def build_html_email(
     replacement_options: Sequence[StarterReplacementOptions] = (),
     *,
     decision_at: datetime,
+    source_reports: Sequence[GameSourceReport] = (),
     display_timezone: tzinfo = ZoneInfo("America/New_York"),
     minutes_before_kickoff: int = 5,
 ) -> HtmlEmail:
@@ -121,7 +129,9 @@ def build_html_email(
         leagues,
         replacement_options,
         display_timezone,
+        source_reports,
     )
+    source_lines = build_source_lines(leagues, source_reports)
     options_by_starter = _index_replacement_options(replacement_options)
     sections = (
         (FantasyAlertSeverity.CRITICAL, "ACTION NEEDED", "#b91c1c"),
@@ -144,6 +154,7 @@ def build_html_email(
     ]
     content = "".join(rendered_sections)
     league_summary = _render_html_league_summary(leagues)
+    sources = _render_html_list_section("SOURCES AND FAILURES", source_lines)
     timestamps = _render_html_timestamps(timestamp_lines)
     return HtmlEmail(
         subject=subject,
@@ -157,7 +168,7 @@ def build_html_email(
             '<div style="background:#ffffff;border:1px solid #e5e7eb;'
             'border-radius:10px;padding:24px">'
             f'<h1 style="font-size:24px;margin:0 0 24px">{escape(kickoff_label)} GAMES</h1>'
-            f"{content}{league_summary}{timestamps}</div></main></body></html>"
+            f"{content}{league_summary}{sources}{timestamps}</div></main></body></html>"
         ),
     )
 
@@ -303,10 +314,24 @@ def _count_label(count: int, singular: str) -> str:
 def _render_html_timestamps(
     lines: Sequence[str],
 ) -> str:
+    return _render_html_list_section("TIMESTAMPS", lines, bordered=True)
+
+
+def _render_html_list_section(
+    heading: str,
+    lines: Sequence[str],
+    *,
+    bordered: bool = False,
+) -> str:
     items = "".join(f"<li>{escape(line)}</li>" for line in lines)
+    border_style = (
+        "border-top:1px solid #e5e7eb;margin:24px 0 0;padding:20px 0 0"
+        if bordered
+        else "margin:24px 0 0"
+    )
     return (
-        '<section style="border-top:1px solid #e5e7eb;margin:24px 0 0;padding:20px 0 0">'
-        '<h2 style="font-size:18px;margin:0 0 10px">TIMESTAMPS</h2>'
+        f'<section style="{border_style}">'
+        f'<h2 style="font-size:18px;margin:0 0 10px">{escape(heading)}</h2>'
         f'<ul style="margin:0;padding-left:20px">{items}</ul></section>'
     )
 

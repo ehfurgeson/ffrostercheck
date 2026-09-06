@@ -7,7 +7,10 @@ from typing import Iterable, Sequence
 
 from app.analysis.fantasy_status import FantasyLeagueStatuses
 from app.analysis.replacements import StarterReplacementOptions
-from app.models import SourceResult
+from app.models import GameSourceReport, SourceResult
+
+
+SourceTimestampRecord = GameSourceReport | SourceResult
 
 
 def build_timestamp_lines(
@@ -16,6 +19,7 @@ def build_timestamp_lines(
     leagues: Sequence[FantasyLeagueStatuses],
     replacement_options: Sequence[StarterReplacementOptions],
     display_timezone: tzinfo,
+    source_reports: Sequence[GameSourceReport] = (),
 ) -> tuple[str, ...]:
     """Build concise, display-timezone metadata without hiding source age."""
 
@@ -26,7 +30,7 @@ def build_timestamp_lines(
         f"Decision time: {_format_timestamp(decision_at, display_timezone)}",
         f"Kickoff: {_format_timestamp(kickoff, display_timezone)}",
     ]
-    for source, results in _source_results_by_source(leagues):
+    for source, results in _source_records_by_source(leagues, source_reports):
         parts: list[str] = []
         published_at = _latest_timestamp(
             (result.published_at for result in results),
@@ -53,7 +57,7 @@ def build_timestamp_lines(
         parts.append(f"retrieved {_format_timestamp(retrieved_at, display_timezone)}")
         if cache_ages:
             parts.append(f"HTTP cache age {_duration_label(max(cache_ages))}")
-        lines.append(f"{_source_label(source)}: {'; '.join(parts)}")
+        lines.append(f"{source_label(source)}: {'; '.join(parts)}")
 
     for depth_chart_as_of in _depth_chart_timestamps(replacement_options):
         lines.append(
@@ -62,10 +66,13 @@ def build_timestamp_lines(
     return tuple(lines)
 
 
-def _source_results_by_source(
+def _source_records_by_source(
     leagues: Sequence[FantasyLeagueStatuses],
-) -> tuple[tuple[str, tuple[SourceResult, ...]], ...]:
-    grouped: dict[str, set[SourceResult]] = {}
+    source_reports: Sequence[GameSourceReport],
+) -> tuple[tuple[str, tuple[SourceTimestampRecord, ...]], ...]:
+    grouped: dict[str, set[SourceTimestampRecord]] = {}
+    for report in source_reports:
+        grouped.setdefault(report.source, set()).add(report)
     for league in leagues:
         for player_status in league.players:
             if player_status.status is None:
@@ -74,7 +81,7 @@ def _source_results_by_source(
                 grouped.setdefault(result.source, set()).add(result)
     return tuple(
         (source, tuple(grouped[source]))
-        for source in sorted(grouped, key=lambda value: (_source_label(value), value))
+        for source in sorted(grouped, key=lambda value: (source_label(value), value))
     )
 
 
@@ -115,7 +122,7 @@ def _duration_label(seconds: int) -> str:
     return f"{seconds} second{suffix}"
 
 
-def _source_label(source: str) -> str:
+def source_label(source: str) -> str:
     return {
         "nfl_inactives": "NFL official inactives",
         "nfl_injuries": "NFL injury report",

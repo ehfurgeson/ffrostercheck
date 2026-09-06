@@ -17,6 +17,7 @@ from app.models import (
     FantasyPlatform,
     FantasyPlayer,
     GameDayState,
+    GameSourceReport,
     InjuryDesignation,
     NFLPlayerStatus,
     OpportunityLevel,
@@ -102,6 +103,27 @@ def _league_statuses(
             LeaguePlayerStatus(player, status, determine_fantasy_severity(player, status))
             for player, status in players_and_statuses
         ),
+    )
+
+
+def _source_report(
+    source: str,
+    state: ReportState,
+    *,
+    game_id: str = "2026_01_NE_NYJ",
+    parsed_teams: frozenset[str] = frozenset({"NE", "NYJ"}),
+    errors: tuple[str, ...] = (),
+    retrieved_at: datetime = DECISION_AT,
+) -> GameSourceReport:
+    return GameSourceReport(
+        source=source,
+        game_id=game_id,
+        report_state=state,
+        expected_teams=frozenset({"NE", "NYJ"}),
+        parsed_teams=parsed_teams,
+        player_results=(),
+        retrieved_at=retrieved_at,
+        errors=errors,
     )
 
 
@@ -202,8 +224,13 @@ def test_builds_one_text_email_grouped_by_urgency_then_league() -> None:
         "updated Sep 6, 2026 12:50:00 PM EDT; "
         "retrieved Sep 6, 2026 12:54:00 PM EDT; HTTP cache age 42 seconds"
     ) in email.body
-    assert email.body.count("NFL official inactives:") == 1
+    assert email.body.count("NFL official inactives:") == 2
     assert "Depth chart snapshot: Sep 6, 2026 12:55:00 PM EDT" in email.body
+    assert "SOURCES AND FAILURES" in email.body
+    assert (
+        "NFL official inactives: COMPLETE — player-level evidence only"
+        in email.body
+    )
 
 
 def test_renders_abnormal_bench_status_as_information() -> None:
@@ -262,7 +289,8 @@ def test_uses_requested_timezone_and_validates_inputs() -> None:
     )
     assert email.subject == "Fantasy Check — 10:00 AM PDT kickoff in 10 min"
     assert email.body == (
-        "10:00 AM PDT GAMES\n\nTIMESTAMPS\n\n"
+        "10:00 AM PDT GAMES\n\nSOURCES AND FAILURES\n\n"
+        "No source reports or player evidence available.\n\nTIMESTAMPS\n\n"
         "Decision time: Sep 6, 2026 9:55:00 AM PDT\n"
         "Kickoff: Sep 6, 2026 10:00:00 AM PDT"
     )
@@ -383,6 +411,86 @@ def test_html_email_escapes_dynamic_content_and_labels_unknown_status() -> None:
     assert "A &amp; B &lt;script&gt; — STARTING (RB)" in email.body
     assert "<script>" not in email.body
     assert "<li>STATUS UNKNOWN — NFL status unavailable</li>" in email.body
+
+
+def test_renders_source_coverage_failures_and_retrieval_timestamps() -> None:
+    complete = _source_report("nfl_inactives", ReportState.COMPLETE)
+    partial = _source_report(
+        "nfl_injuries",
+        ReportState.PARTIAL,
+        parsed_teams=frozenset({"NE"}),
+        errors=("Injury report missing team(s): NYJ",),
+        retrieved_at=datetime(2026, 9, 6, 16, 53, tzinfo=timezone.utc),
+    )
+    failed = _source_report(
+        "sleeper_status",
+        ReportState.FAILED,
+        parsed_teams=frozenset(),
+        errors=("Catalog request timed out <retry>",),
+        retrieved_at=datetime(2026, 9, 6, 16, 54, tzinfo=timezone.utc),
+    )
+
+    text_email = build_text_email(
+        KICKOFF,
+        (),
+        decision_at=DECISION_AT,
+        source_reports=(complete, partial, failed),
+    )
+    html_email = build_html_email(
+        KICKOFF,
+        (),
+        decision_at=DECISION_AT,
+        source_reports=(complete, partial, failed),
+    )
+
+    assert (
+        "NFL official inactives: COMPLETE — 1 game; team coverage 2/2 (NE, NYJ)"
+        in text_email.body
+    )
+    assert (
+        "NFL injury report: PARTIAL — 1 game; team coverage 1/2 (NE)"
+        in text_email.body
+    )
+    assert (
+        "Limitation [2026_01_NE_NYJ]: Injury report missing team(s): NYJ"
+        in text_email.body
+    )
+    assert (
+        "Sleeper status fallback: FAILED — 1 game; team coverage 0/2 (none)"
+        in text_email.body
+    )
+    assert "Failure [2026_01_NE_NYJ]: Catalog request timed out <retry>" in text_email.body
+    assert "Sleeper status fallback: retrieved Sep 6, 2026 12:54:00 PM EDT" in text_email.body
+    assert "Catalog request timed out &lt;retry&gt;" in html_email.body
+    assert "Catalog request timed out <retry>" not in html_email.body
+
+
+def test_aggregates_mixed_source_states_across_games() -> None:
+    reports = (
+        _source_report("nfl_inactives", ReportState.COMPLETE),
+        _source_report(
+            "nfl_inactives",
+            ReportState.NOT_YET_PUBLISHED,
+            game_id="2026_01_MIA_BUF",
+            parsed_teams=frozenset(),
+        ),
+    )
+
+    body = build_text_email(
+        KICKOFF,
+        (),
+        decision_at=DECISION_AT,
+        source_reports=reports,
+    ).body
+
+    assert (
+        "NFL official inactives: MIXED (1 complete, 1 not yet published) — "
+        "2 games; team coverage 2/4 (NE, NYJ)"
+    ) in body
+    assert (
+        "Limitation [2026_01_MIA_BUF]: Report was not yet published."
+        in body
+    )
 
 
 def test_html_email_uses_shared_input_validation() -> None:
