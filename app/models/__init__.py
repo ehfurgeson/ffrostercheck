@@ -1,5 +1,6 @@
 """Platform-neutral Fantasy Watchdog data models."""
 
+from app.models.freshness import LineupRefreshEvidence
 from app.models.game import NFLGame, RelevantGame
 from app.models.league import FantasyLeague, FantasyPlatform, FantasyRoster
 from app.models.opportunity import DepthOpportunity, OpportunityLevel
@@ -27,6 +28,7 @@ __all__ = [
     "GameDayState",
     "GameSourceReport",
     "InjuryDesignation",
+    "LineupRefreshEvidence",
     "NFLGame",
     "NFLPlayerStatus",
     "OpportunityLevel",

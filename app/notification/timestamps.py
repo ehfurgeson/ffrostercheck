@@ -7,7 +7,7 @@ from typing import Iterable, Sequence
 
 from app.analysis.fantasy_status import FantasyLeagueStatuses
 from app.analysis.replacements import StarterReplacementOptions
-from app.models import GameSourceReport, SourceResult
+from app.models import GameSourceReport, LineupRefreshEvidence, SourceResult
 
 
 SourceTimestampRecord = GameSourceReport | SourceResult
@@ -20,6 +20,7 @@ def build_timestamp_lines(
     replacement_options: Sequence[StarterReplacementOptions],
     display_timezone: tzinfo,
     source_reports: Sequence[GameSourceReport] = (),
+    lineup_refreshes: Sequence[LineupRefreshEvidence] = (),
 ) -> tuple[str, ...]:
     """Build concise, display-timezone metadata without hiding source age."""
 
@@ -30,6 +31,18 @@ def build_timestamp_lines(
         f"Decision time: {_format_timestamp(decision_at, display_timezone)}",
         f"Kickoff: {_format_timestamp(kickoff, display_timezone)}",
     ]
+    for refresh in lineup_refreshes:
+        retrieved_at = _require_aware(refresh.retrieved_at, "lineup retrieved_at")
+        parts = [f"retrieved {_format_timestamp(retrieved_at, display_timezone)}"]
+        if refresh.http_cache_age_seconds is not None:
+            if refresh.http_cache_age_seconds < 0:
+                raise ValueError("lineup HTTP cache age must be at least 0")
+            parts.append(f"HTTP cache age {_duration_label(refresh.http_cache_age_seconds)}")
+        else:
+            parts.append("HTTP cache age unavailable")
+        if refresh.detail:
+            parts.append(refresh.detail)
+        lines.append(f"{source_label(refresh.source)} lineup: {'; '.join(parts)}")
     for source, results in _source_records_by_source(leagues, source_reports):
         parts: list[str] = []
         published_at = _latest_timestamp(

@@ -21,6 +21,7 @@ from app.models import (
     GameDayState,
     GameSourceReport,
     InjuryDesignation,
+    LineupRefreshEvidence,
     OpportunityLevel,
     RosterEligibility,
 )
@@ -53,6 +54,7 @@ def build_text_email(
     source_reports: Sequence[GameSourceReport] = (),
     display_timezone: tzinfo = ZoneInfo("America/New_York"),
     minutes_before_kickoff: int = 5,
+    lineup_refreshes: Sequence[LineupRefreshEvidence] = (),
 ) -> TextEmail:
     """Render one kickoff-window alert, grouped by urgency and then league."""
 
@@ -68,6 +70,7 @@ def build_text_email(
         replacement_options,
         display_timezone,
         source_reports,
+        lineup_refreshes,
     )
     source_lines = build_source_lines(leagues, source_reports)
     options_by_starter = _index_replacement_options(replacement_options)
@@ -115,6 +118,7 @@ def build_html_email(
     source_reports: Sequence[GameSourceReport] = (),
     display_timezone: tzinfo = ZoneInfo("America/New_York"),
     minutes_before_kickoff: int = 5,
+    lineup_refreshes: Sequence[LineupRefreshEvidence] = (),
 ) -> HtmlEmail:
     """Render an HTML counterpart to the plain-text kickoff-window alert."""
 
@@ -130,6 +134,7 @@ def build_html_email(
         replacement_options,
         display_timezone,
         source_reports,
+        lineup_refreshes,
     )
     source_lines = build_source_lines(leagues, source_reports)
     options_by_starter = _index_replacement_options(replacement_options)
