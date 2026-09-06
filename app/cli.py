@@ -58,6 +58,7 @@ from app.storage.cache import (
     render_cached_snapshot,
     render_status_resolution,
 )
+from app.scheduling import build_game_day_plan, render_game_day_plan
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -96,6 +97,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     kickoff_windows.add_argument("--config", type=Path, default=Path("config.yaml"))
     kickoff_windows.add_argument("--env-file", type=Path, default=Path(".env"))
+    game_day_plan = subparsers.add_parser(
+        "plan-game-day",
+        description="Plan prefetch and final jobs for relevant games on one local NFL game day",
+    )
+    game_day_plan.add_argument("--config", type=Path, default=Path("config.yaml"))
+    game_day_plan.add_argument("--env-file", type=Path, default=Path(".env"))
+    game_day_plan.add_argument(
+        "--as-of",
+        help="Timezone-aware ISO planning time; defaults to now in UTC",
+    )
+    game_day_plan.add_argument(
+        "--game-date",
+        help="Local game date in YYYY-MM-DD; defaults to the planning date",
+    )
     inactives = subparsers.add_parser(
         "nfl-inactives",
         description="Parse official NFL.com inactives without inferring active from absence",
@@ -275,6 +290,8 @@ def main(argv: list[str] | None = None) -> int:
             return _next_games(args.config, args.env_file)
         if args.command == "kickoff-windows":
             return _kickoff_windows(args.config, args.env_file)
+        if args.command == "plan-game-day":
+            return _plan_game_day(args)
         if args.command == "nfl-inactives":
             return _nfl_inactives(args)
         if args.command == "nfl-injuries":
@@ -375,6 +392,52 @@ def _kickoff_windows(config_path: Path, env_file: Path) -> int:
     result = _assigned_next_games(config_path, env_file)
     print(render_kickoff_windows(group_kickoff_windows(result)))
     return 0 if not result.data_errors else 1
+
+
+def _plan_game_day(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    planning_at = _parse_as_of(args.as_of)
+    mapping, snapshot = _mapped_rosters(args.config, args.env_file)
+    if snapshot.schedules.frame is None:
+        raise NFLVerseLoadError(
+            "Cannot plan game day; unavailable nflverse data: schedules"
+        )
+    assignments = assign_next_games(
+        mapping.rosters,
+        parse_nfl_schedule(snapshot.schedules.frame),
+        as_of=planning_at,
+    )
+    kickoff_plan = group_kickoff_windows(assignments)
+    game_date = _parse_game_date(args.game_date)
+    plan = build_game_day_plan(
+        kickoff_plan,
+        config.alerts,
+        planned_at=planning_at,
+        display_timezone=config.timezone_info,
+        game_date=game_date,
+    )
+
+    players = tuple(player for roster in mapping.rosters for player in roster.players)
+    print(render_game_day_plan(plan))
+    if config.depth_chart.enabled:
+        depth_snapshot = load_latest_depth_snapshot(
+            config.season,
+            as_of=planning_at,
+            max_age_hours=config.depth_chart.max_age_hours,
+        )
+        joined = join_owned_skill_players(
+            players,
+            depth_snapshot,
+            identities=_identity_resolver(snapshot).identities,
+        )
+        relations = build_owned_depth_relations(joined)
+        print(render_depth_snapshot(depth_snapshot))
+        print(render_owned_depth_relations(relations))
+        print(render_status_scope(build_status_scope(players, relations)))
+    else:
+        print("Depth planning: disabled")
+
+    return 1 if mapping.unresolved or assignments.data_errors else 0
 
 
 def _assigned_next_games(config_path: Path, env_file: Path):
@@ -588,6 +651,15 @@ def _parse_as_of(value: str | None) -> datetime:
     if parsed.tzinfo is None:
         raise ConfigError("--as-of must be a timezone-aware ISO timestamp")
     return parsed.astimezone(timezone.utc)
+
+
+def _parse_game_date(value: str | None):
+    if value is None:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise ConfigError(f"Invalid --game-date: {value}; expected YYYY-MM-DD") from exc
 
 
 def _load_depth_chart_rows(path: Path) -> list:
