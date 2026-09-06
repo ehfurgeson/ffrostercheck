@@ -9,8 +9,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.analysis import (
+    build_status_scope,
     combine_official_statuses,
     render_player_statuses,
+    render_status_scope,
     subjects_from_fantasy_players,
     subjects_from_source_reports,
 )
@@ -542,9 +544,11 @@ def _owned_depth(args: argparse.Namespace) -> int:
         identities=resolver.identities,
     )
     relations = build_owned_depth_relations(result)
+    status_scope = build_status_scope(players, relations)
     print(render_depth_snapshot(depth_snapshot))
     print(render_owned_depth_join(result))
     print(render_owned_depth_relations(relations))
+    print(render_status_scope(status_scope))
     data_errors = {
         "not_in_snapshot",
         "ambiguous_depth_id",
@@ -552,6 +556,7 @@ def _owned_depth(args: argparse.Namespace) -> int:
     return 1 if (
         any(issue.state.value in data_errors for issue in result.issues)
         or bool(relations.issues)
+        or bool(status_scope.issues)
     ) else 0
 
 

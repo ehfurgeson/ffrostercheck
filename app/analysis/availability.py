@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from typing import Sequence
 
 from app.analysis.confidence import EvidenceOrigin, score_status_confidence
@@ -18,6 +19,8 @@ from app.models import (
     RosterEligibility,
     SourceResult,
 )
+from app.nfl.depth_chart import DepthChartRow
+from app.nfl.depth_relations import OwnedDepthRelations
 from app.nfl.identity import normalize_name, normalize_position, normalize_team
 
 
@@ -46,6 +49,34 @@ class StatusSubject:
     roster_eligibility: RosterEligibility = RosterEligibility.UNKNOWN
 
 
+class StatusScopeIssueState(str, Enum):
+    """A limitation that prevents a depth blocker from entering status scope."""
+
+    UNRESOLVED_BLOCKER_IDENTITY = "unresolved_blocker_identity"
+
+
+@dataclass(frozen=True)
+class StatusScopeIssue:
+    """One unresolved blocker and the owned players whose roles it affects."""
+
+    state: StatusScopeIssueState
+    blocker_name: str
+    nfl_team: str | None
+    position: str | None
+    affected_player_ids: tuple[str, ...]
+    detail: str
+
+
+@dataclass(frozen=True)
+class StatusScope:
+    """Deduplicated NFL status subjects for owned players and their blockers."""
+
+    subjects: tuple[StatusSubject, ...]
+    resolved_blocker_ids: frozenset[str]
+    unowned_blocker_ids: frozenset[str]
+    issues: tuple[StatusScopeIssue, ...]
+
+
 def subjects_from_fantasy_players(
     players: Sequence[FantasyPlayer],
     *,
@@ -66,6 +97,93 @@ def subjects_from_fantasy_players(
             roster_eligibility=roster_eligibility,
         )
     return tuple(subjects.values())
+
+
+def build_status_scope(
+    players: Sequence[FantasyPlayer],
+    depth_relations: OwnedDepthRelations,
+    *,
+    roster_eligibility: RosterEligibility = RosterEligibility.UNKNOWN,
+) -> StatusScope:
+    """Add resolved same-slot blockers without inventing fantasy instances."""
+
+    owned_subjects = subjects_from_fantasy_players(
+        players,
+        roster_eligibility=roster_eligibility,
+    )
+    subjects = {subject.canonical_player_id: subject for subject in owned_subjects}
+    owned_ids = frozenset(subjects)
+    blocker_ids: set[str] = set()
+    unresolved: dict[
+        tuple[str | None, str, str | None], tuple[DepthChartRow, list[str]]
+    ] = {}
+
+    for beneficiary_id, relation in depth_relations.relations.items():
+        for blocker in relation.players_ahead:
+            row = blocker.depth_row
+            blocker_id = blocker.canonical_player_id
+            if blocker_id:
+                blocker_ids.add(blocker_id)
+                subjects.setdefault(
+                    blocker_id,
+                    StatusSubject(
+                        canonical_player_id=blocker_id,
+                        name=row.player_name,
+                        nfl_team=normalize_team(row.team),
+                        position=normalize_position(row.position),
+                    ),
+                )
+                continue
+
+            key = (
+                normalize_team(row.team),
+                normalize_name(row.player_name),
+                normalize_position(row.position),
+            )
+            if key not in unresolved:
+                unresolved[key] = (row, [])
+            affected = unresolved[key][1]
+            if beneficiary_id not in affected:
+                affected.append(beneficiary_id)
+
+    issues = tuple(
+        StatusScopeIssue(
+            state=StatusScopeIssueState.UNRESOLVED_BLOCKER_IDENTITY,
+            blocker_name=row.player_name,
+            nfl_team=normalize_team(row.team),
+            position=normalize_position(row.position),
+            affected_player_ids=tuple(affected),
+            detail="depth blocker has no canonical GSIS identity; availability remains unknown",
+        )
+        for row, affected in unresolved.values()
+    )
+    return StatusScope(
+        subjects=tuple(subjects.values()),
+        resolved_blocker_ids=frozenset(blocker_ids),
+        unowned_blocker_ids=frozenset(blocker_ids - owned_ids),
+        issues=issues,
+    )
+
+
+def render_status_scope(scope: StatusScope) -> str:
+    """Render status-scope expansion and unresolved blocker limitations."""
+
+    owned_count = len(scope.subjects) - len(scope.unowned_blocker_ids)
+    lines = [
+        f"NFL status subjects: {len(scope.subjects)}",
+        f"Owned subjects: {owned_count}",
+        f"Resolved depth blockers: {len(scope.resolved_blocker_ids)}",
+        f"Unowned depth blockers added: {len(scope.unowned_blocker_ids)}",
+        f"Unresolved blocker limitations: {len(scope.issues)}",
+    ]
+    for issue in scope.issues:
+        affected = ", ".join(issue.affected_player_ids)
+        team = f" ({issue.nfl_team})" if issue.nfl_team else ""
+        lines.append(
+            f"  {issue.state.value}: {issue.blocker_name}{team}; "
+            f"affects {affected} — {issue.detail}"
+        )
+    return "\n".join(lines)
 
 
 def subjects_from_source_reports(
