@@ -2,6 +2,7 @@
 
 from app.models.game import NFLGame, RelevantGame
 from app.models.league import FantasyLeague, FantasyPlatform, FantasyRoster
+from app.models.opportunity import DepthOpportunity, OpportunityLevel
 from app.models.player import FantasyPlayer
 from app.models.status import (
     Confidence,
@@ -16,6 +17,7 @@ from app.models.status import (
 
 __all__ = [
     "Confidence",
+    "DepthOpportunity",
     "FantasyLeague",
     "FantasyPlatform",
     "FantasyPlayer",
@@ -25,6 +27,7 @@ __all__ = [
     "InjuryDesignation",
     "NFLGame",
     "NFLPlayerStatus",
+    "OpportunityLevel",
     "RelevantGame",
     "ReportState",
     "RosterEligibility",
