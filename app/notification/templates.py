@@ -23,6 +23,7 @@ from app.models import (
     OpportunityLevel,
     RosterEligibility,
 )
+from app.notification.timestamps import build_timestamp_lines
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,7 @@ def build_text_email(
     leagues: Sequence[FantasyLeagueStatuses],
     replacement_options: Sequence[StarterReplacementOptions] = (),
     *,
+    decision_at: datetime,
     display_timezone: tzinfo = ZoneInfo("America/New_York"),
     minutes_before_kickoff: int = 5,
 ) -> TextEmail:
@@ -55,6 +57,13 @@ def build_text_email(
         kickoff,
         display_timezone,
         minutes_before_kickoff,
+    )
+    timestamp_lines = build_timestamp_lines(
+        kickoff,
+        decision_at,
+        leagues,
+        replacement_options,
+        display_timezone,
     )
     options_by_starter = _index_replacement_options(replacement_options)
     lines = [f"{kickoff_label} GAMES"]
@@ -78,6 +87,15 @@ def build_text_email(
     if league_summary:
         lines.extend(("", "LEAGUE SUMMARY", "", league_summary))
 
+    lines.extend(
+        (
+            "",
+            "TIMESTAMPS",
+            "",
+            "\n".join(timestamp_lines),
+        )
+    )
+
     return TextEmail(subject=subject, body="\n".join(lines))
 
 
@@ -86,6 +104,7 @@ def build_html_email(
     leagues: Sequence[FantasyLeagueStatuses],
     replacement_options: Sequence[StarterReplacementOptions] = (),
     *,
+    decision_at: datetime,
     display_timezone: tzinfo = ZoneInfo("America/New_York"),
     minutes_before_kickoff: int = 5,
 ) -> HtmlEmail:
@@ -95,6 +114,13 @@ def build_html_email(
         kickoff,
         display_timezone,
         minutes_before_kickoff,
+    )
+    timestamp_lines = build_timestamp_lines(
+        kickoff,
+        decision_at,
+        leagues,
+        replacement_options,
+        display_timezone,
     )
     options_by_starter = _index_replacement_options(replacement_options)
     sections = (
@@ -118,6 +144,7 @@ def build_html_email(
     ]
     content = "".join(rendered_sections)
     league_summary = _render_html_league_summary(leagues)
+    timestamps = _render_html_timestamps(timestamp_lines)
     return HtmlEmail(
         subject=subject,
         body=(
@@ -130,7 +157,7 @@ def build_html_email(
             '<div style="background:#ffffff;border:1px solid #e5e7eb;'
             'border-radius:10px;padding:24px">'
             f'<h1 style="font-size:24px;margin:0 0 24px">{escape(kickoff_label)} GAMES</h1>'
-            f"{content}{league_summary}</div></main></body></html>"
+            f"{content}{league_summary}{timestamps}</div></main></body></html>"
         ),
     )
 
@@ -271,6 +298,17 @@ def _league_summary_lines(league_statuses: FantasyLeagueStatuses) -> tuple[str, 
 def _count_label(count: int, singular: str) -> str:
     suffix = "" if count == 1 else "s"
     return f"{count} {singular}{suffix}"
+
+
+def _render_html_timestamps(
+    lines: Sequence[str],
+) -> str:
+    items = "".join(f"<li>{escape(line)}</li>" for line in lines)
+    return (
+        '<section style="border-top:1px solid #e5e7eb;margin:24px 0 0;padding:20px 0 0">'
+        '<h2 style="font-size:18px;margin:0 0 10px">TIMESTAMPS</h2>'
+        f'<ul style="margin:0;padding-left:20px">{items}</ul></section>'
+    )
 
 
 def _render_html_player(

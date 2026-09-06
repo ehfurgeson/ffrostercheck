@@ -21,6 +21,8 @@ from app.models import (
     NFLPlayerStatus,
     OpportunityLevel,
     RosterEligibility,
+    ReportState,
+    SourceResult,
 )
 from app.notification import build_html_email, build_text_email
 
@@ -75,6 +77,7 @@ def _status(
     designation: InjuryDesignation = InjuryDesignation.NONE,
     eligibility: RosterEligibility = RosterEligibility.ELIGIBLE,
     injury: str | None = None,
+    source_results: tuple[SourceResult, ...] = (),
 ) -> NFLPlayerStatus:
     return NFLPlayerStatus(
         canonical_player_id=player_id,
@@ -84,6 +87,7 @@ def _status(
         confidence=Confidence.OFFICIAL,
         decision_at=DECISION_AT,
         injury_description=injury,
+        source_results=source_results,
     )
 
 
@@ -109,11 +113,32 @@ def test_builds_one_text_email_grouped_by_urgency_then_league() -> None:
     healthy_bench = _player(sleeper, "hidden", "Healthy Bench", starter=False)
     risky = _player(espn, "risky", "Risky Starter", starter=True)
     healthy = _player(espn, "healthy", "Healthy Starter", starter=True, position="WR")
+    inactives_result = SourceResult(
+        source="nfl_inactives",
+        source_url="https://www.nfl.com/inactives/",
+        success=True,
+        report_state=ReportState.COMPLETE,
+        retrieved_at=datetime(2026, 9, 6, 16, 54, tzinfo=timezone.utc),
+        published_at=datetime(2026, 9, 6, 16, 20, tzinfo=timezone.utc),
+        source_updated_at=datetime(2026, 9, 6, 16, 50, tzinfo=timezone.utc),
+        http_cache_age_seconds=42,
+    )
     sleeper_statuses = _league_statuses(
         sleeper,
         (
-            (inactive, _status("inactive", game_day=GameDayState.INACTIVE, injury="knee")),
-            (replacement, _status("replacement")),
+            (
+                inactive,
+                _status(
+                    "inactive",
+                    game_day=GameDayState.INACTIVE,
+                    injury="knee",
+                    source_results=(inactives_result,),
+                ),
+            ),
+            (
+                replacement,
+                _status("replacement", source_results=(inactives_result,)),
+            ),
             (healthy_bench, _status("hidden")),
         ),
     )
@@ -151,6 +176,7 @@ def test_builds_one_text_email_grouped_by_urgency_then_league() -> None:
         KICKOFF,
         (sleeper_statuses, espn_statuses),
         (options,),
+        decision_at=DECISION_AT,
     )
 
     assert email.subject == "Fantasy Check — 1:00 PM EDT kickoff in 5 min"
@@ -163,11 +189,21 @@ def test_builds_one_text_email_grouped_by_urgency_then_league() -> None:
     assert "Risky Starter — STARTING (RB)\nActive\nQuestionable — ankle" in email.body
     assert "Healthy Starter — STARTING (WR)\nActive" in email.body
     assert "Healthy Bench" not in email.body
-    assert email.body.endswith(
+    assert (
         "LEAGUE SUMMARY\n\n"
         "Friends\n1 lineup issue\n0 warnings\n\n"
         "Main\n0 lineup issues\n1 warning"
-    )
+    ) in email.body
+    assert "TIMESTAMPS" in email.body
+    assert "Decision time: Sep 6, 2026 12:55:00 PM EDT" in email.body
+    assert "Kickoff: Sep 6, 2026 1:00:00 PM EDT" in email.body
+    assert (
+        "NFL official inactives: published Sep 6, 2026 12:20:00 PM EDT; "
+        "updated Sep 6, 2026 12:50:00 PM EDT; "
+        "retrieved Sep 6, 2026 12:54:00 PM EDT; HTTP cache age 42 seconds"
+    ) in email.body
+    assert email.body.count("NFL official inactives:") == 1
+    assert "Depth chart snapshot: Sep 6, 2026 12:55:00 PM EDT" in email.body
 
 
 def test_renders_abnormal_bench_status_as_information() -> None:
@@ -178,7 +214,7 @@ def test_renders_abnormal_bench_status_as_information() -> None:
         ((bench, _status("bench", eligibility=RosterEligibility.INELIGIBLE)),),
     )
 
-    body = build_text_email(KICKOFF, (statuses,)).body
+    body = build_text_email(KICKOFF, (statuses,), decision_at=DECISION_AT).body
 
     assert "BENCH NOTES" in body
     assert "Unavailable Bench — BENCH (RB)" in body
@@ -190,7 +226,7 @@ def test_unknown_status_is_explicit_and_never_rendered_as_healthy() -> None:
     player = _player(league, "missing", "Needs Verification", starter=True)
     statuses = _league_statuses(league, ((player, None),))
 
-    body = build_text_email(KICKOFF, (statuses,)).body
+    body = build_text_email(KICKOFF, (statuses,), decision_at=DECISION_AT).body
 
     assert "RISK" in body
     assert "STATUS UNKNOWN — NFL status unavailable" in body
@@ -206,7 +242,12 @@ def test_renders_empty_replacement_result_without_inventing_an_option() -> None:
     )
     options = StarterReplacementOptions(statuses.players[0], ())
 
-    body = build_text_email(KICKOFF, (statuses,), (options,)).body
+    body = build_text_email(
+        KICKOFF,
+        (statuses,),
+        (options,),
+        decision_at=DECISION_AT,
+    ).body
 
     assert "Suggested replacements:\nNone verified and unlocked." in body
 
@@ -215,16 +256,32 @@ def test_uses_requested_timezone_and_validates_inputs() -> None:
     email = build_text_email(
         KICKOFF,
         (),
+        decision_at=DECISION_AT,
         display_timezone=ZoneInfo("America/Los_Angeles"),
         minutes_before_kickoff=10,
     )
     assert email.subject == "Fantasy Check — 10:00 AM PDT kickoff in 10 min"
-    assert email.body == "10:00 AM PDT GAMES"
+    assert email.body == (
+        "10:00 AM PDT GAMES\n\nTIMESTAMPS\n\n"
+        "Decision time: Sep 6, 2026 9:55:00 AM PDT\n"
+        "Kickoff: Sep 6, 2026 10:00:00 AM PDT"
+    )
 
     with pytest.raises(ValueError, match="kickoff must be timezone-aware"):
-        build_text_email(KICKOFF.replace(tzinfo=None), ())
+        build_text_email(
+            KICKOFF.replace(tzinfo=None),
+            (),
+            decision_at=DECISION_AT,
+        )
     with pytest.raises(ValueError, match="minutes_before_kickoff"):
-        build_text_email(KICKOFF, (), minutes_before_kickoff=-1)
+        build_text_email(
+            KICKOFF,
+            (),
+            decision_at=DECISION_AT,
+            minutes_before_kickoff=-1,
+        )
+    with pytest.raises(ValueError, match="decision_at must be timezone-aware"):
+        build_text_email(KICKOFF, (), decision_at=DECISION_AT.replace(tzinfo=None))
 
 
 def test_rejects_duplicate_replacement_options_for_one_starter() -> None:
@@ -237,7 +294,12 @@ def test_rejects_duplicate_replacement_options_for_one_starter() -> None:
     options = StarterReplacementOptions(statuses.players[0], ())
 
     with pytest.raises(ValueError, match="duplicate replacement options"):
-        build_text_email(KICKOFF, (statuses,), (options, options))
+        build_text_email(
+            KICKOFF,
+            (statuses,),
+            (options, options),
+            decision_at=DECISION_AT,
+        )
 
 
 def test_builds_html_email_with_matching_sections_and_replacements() -> None:
@@ -270,6 +332,7 @@ def test_builds_html_email_with_matching_sections_and_replacements() -> None:
         KICKOFF,
         (sleeper_statuses, espn_statuses),
         (options,),
+        decision_at=DECISION_AT,
     )
 
     assert email.subject == "Fantasy Check — 1:00 PM EDT kickoff in 5 min"
@@ -285,6 +348,9 @@ def test_builds_html_email_with_matching_sections_and_replacements() -> None:
     assert "<h3 style=\"font-size:16px;margin:0 0 6px\">Friends</h3>" in email.body
     assert "<li>1 lineup issue</li><li>0 warnings</li>" in email.body
     assert "<li>0 lineup issues</li><li>1 warning</li>" in email.body
+    assert "TIMESTAMPS" in email.body
+    assert "<li>Decision time: Sep 6, 2026 12:55:00 PM EDT</li>" in email.body
+    assert "<li>Kickoff: Sep 6, 2026 1:00:00 PM EDT</li>" in email.body
 
 
 def test_league_summary_marks_clear_leagues_and_ignores_bench_issues() -> None:
@@ -299,10 +365,10 @@ def test_league_summary_marks_clear_leagues_and_ignores_bench_issues() -> None:
         ),
     )
 
-    text_email = build_text_email(KICKOFF, (statuses,))
-    html_email = build_html_email(KICKOFF, (statuses,))
+    text_email = build_text_email(KICKOFF, (statuses,), decision_at=DECISION_AT)
+    html_email = build_html_email(KICKOFF, (statuses,), decision_at=DECISION_AT)
 
-    assert text_email.body.endswith("LEAGUE SUMMARY\n\nDynasty\nNo starter issues")
+    assert "LEAGUE SUMMARY\n\nDynasty\nNo starter issues" in text_email.body
     assert "<li>No starter issues</li>" in html_email.body
 
 
@@ -311,7 +377,7 @@ def test_html_email_escapes_dynamic_content_and_labels_unknown_status() -> None:
     player = _player(league, "missing", "A & B <script>", starter=True)
     statuses = _league_statuses(league, ((player, None),))
 
-    email = build_html_email(KICKOFF, (statuses,))
+    email = build_html_email(KICKOFF, (statuses,), decision_at=DECISION_AT)
 
     assert "Friends &amp; &lt;Family&gt; — Sleeper" in email.body
     assert "A &amp; B &lt;script&gt; — STARTING (RB)" in email.body
@@ -321,6 +387,58 @@ def test_html_email_escapes_dynamic_content_and_labels_unknown_status() -> None:
 
 def test_html_email_uses_shared_input_validation() -> None:
     with pytest.raises(ValueError, match="kickoff must be timezone-aware"):
-        build_html_email(KICKOFF.replace(tzinfo=None), ())
+        build_html_email(
+            KICKOFF.replace(tzinfo=None),
+            (),
+            decision_at=DECISION_AT,
+        )
     with pytest.raises(ValueError, match="minutes_before_kickoff"):
-        build_html_email(KICKOFF, (), minutes_before_kickoff=-1)
+        build_html_email(
+            KICKOFF,
+            (),
+            decision_at=DECISION_AT,
+            minutes_before_kickoff=-1,
+        )
+
+
+def test_rejects_status_from_a_different_decision_time() -> None:
+    league = _league("league", "Friends", FantasyPlatform.SLEEPER)
+    player = _player(league, "player", "Player", starter=True)
+    statuses = _league_statuses(
+        league,
+        (
+            (
+                player,
+                NFLPlayerStatus(
+                    canonical_player_id="player",
+                    roster_eligibility=RosterEligibility.ELIGIBLE,
+                    game_day_state=GameDayState.ACTIVE,
+                    injury_designation=InjuryDesignation.NONE,
+                    confidence=Confidence.OFFICIAL,
+                    decision_at=datetime(2026, 9, 6, 16, 54, tzinfo=timezone.utc),
+                ),
+            ),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="status decision_at must match"):
+        build_text_email(KICKOFF, (statuses,), decision_at=DECISION_AT)
+
+
+def test_rejects_naive_source_timestamps() -> None:
+    league = _league("league", "Friends", FantasyPlatform.SLEEPER)
+    player = _player(league, "player", "Player", starter=True)
+    result = SourceResult(
+        source="nfl_inactives",
+        source_url=None,
+        success=True,
+        report_state=ReportState.COMPLETE,
+        retrieved_at=datetime(2026, 9, 6, 16, 54),
+    )
+    statuses = _league_statuses(
+        league,
+        ((player, _status("player", source_results=(result,))),),
+    )
+
+    with pytest.raises(ValueError, match="nfl_inactives.retrieved_at"):
+        build_html_email(KICKOFF, (statuses,), decision_at=DECISION_AT)
