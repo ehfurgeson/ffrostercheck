@@ -12,7 +12,20 @@ from app.analysis.availability import (
     subjects_from_fantasy_players,
     subjects_from_source_reports,
 )
-from app.analysis.confidence import EvidenceOrigin, degrade_cached_confidence, score_status_confidence
+from app.analysis.confidence import (
+    EvidenceOrigin,
+    degrade_cached_confidence,
+    score_status_confidence,
+)
+from app.analysis.fantasy_status import (
+    FantasyLeagueStatuses,
+    FantasyStatusIssue,
+    FantasyStatusIssueState,
+    FantasyStatusMapping,
+    FantasyStatusMappingError,
+    LeaguePlayerStatus,
+    map_nfl_statuses_to_fantasy_leagues,
+)
 from app.analysis.opportunity import (
     DepthOpportunityAnalysis,
     OpportunityLimitation,
@@ -26,6 +39,12 @@ from app.analysis.opportunity import (
 __all__ = [
     "DepthOpportunityAnalysis",
     "EvidenceOrigin",
+    "FantasyLeagueStatuses",
+    "FantasyStatusIssue",
+    "FantasyStatusIssueState",
+    "FantasyStatusMapping",
+    "FantasyStatusMappingError",
+    "LeaguePlayerStatus",
     "OpportunityLimitation",
     "OpportunityLimitationState",
     "StatusScope",
@@ -37,6 +56,7 @@ __all__ = [
     "combine_official_statuses",
     "degrade_cached_confidence",
     "detect_depth_opportunities",
+    "map_nfl_statuses_to_fantasy_leagues",
     "render_player_statuses",
     "render_depth_opportunities",
     "render_depth_opportunity_analysis",
