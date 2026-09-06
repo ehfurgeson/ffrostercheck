@@ -5,10 +5,12 @@ import pytest
 from app.analysis import (
     FantasyStatusIssueState,
     FantasyStatusMappingError,
+    determine_fantasy_severity,
     map_nfl_statuses_to_fantasy_leagues,
 )
 from app.models import (
     Confidence,
+    FantasyAlertSeverity,
     FantasyLeague,
     FantasyPlatform,
     FantasyPlayer,
@@ -54,14 +56,22 @@ def _roster(
     return FantasyRoster(league=league, team_name=f"Team {league_id}", players=(player,))
 
 
-def _status(canonical_id: str = "00-001") -> NFLPlayerStatus:
+def _status(
+    canonical_id: str = "00-001",
+    *,
+    roster_eligibility: RosterEligibility = RosterEligibility.ELIGIBLE,
+    game_day_state: GameDayState = GameDayState.ACTIVE,
+    injury_designation: InjuryDesignation = InjuryDesignation.NONE,
+    official_inactive: bool | None = False,
+) -> NFLPlayerStatus:
     return NFLPlayerStatus(
         canonical_player_id=canonical_id,
-        roster_eligibility=RosterEligibility.ELIGIBLE,
-        game_day_state=GameDayState.ACTIVE,
-        injury_designation=InjuryDesignation.NONE,
+        roster_eligibility=roster_eligibility,
+        game_day_state=game_day_state,
+        injury_designation=injury_designation,
         confidence=Confidence.OFFICIAL,
         decision_at=NOW,
+        official_inactive=official_inactive,
     )
 
 
@@ -80,6 +90,11 @@ def test_one_nfl_status_maps_to_every_fantasy_league_instance() -> None:
     assert [league.league.id for league in mapping.leagues] == ["friends", "family", "main"]
     mapped = [league.players[0] for league in mapping.leagues]
     assert all(item.status is status for item in mapped)
+    assert [item.severity for item in mapped] == [
+        FantasyAlertSeverity.NORMAL,
+        FantasyAlertSeverity.NORMAL,
+        FantasyAlertSeverity.NORMAL,
+    ]
     assert len(mapping.leagues[0].starters) == 1
     assert len(mapping.leagues[2].bench) == 1
 
@@ -99,6 +114,10 @@ def test_unresolved_and_missing_status_players_remain_visible_as_issues() -> Non
         FantasyStatusIssueState.MISSING_NFL_STATUS,
     ]
     assert all(league.players[0].is_mapped is False for league in mapping.leagues)
+    assert [league.players[0].severity for league in mapping.leagues] == [
+        FantasyAlertSeverity.WARNING,
+        FantasyAlertSeverity.WARNING,
+    ]
 
 
 def test_unowned_depth_blocker_status_does_not_create_a_fantasy_instance() -> None:
@@ -119,3 +138,75 @@ def test_duplicate_canonical_statuses_fail_instead_of_overwriting() -> None:
             (_roster("owned"),),
             (_status(), _status()),
         )
+
+
+@pytest.mark.parametrize(
+    ("status", "starter_severity", "bench_severity"),
+    (
+        (
+            _status(roster_eligibility=RosterEligibility.INELIGIBLE),
+            FantasyAlertSeverity.CRITICAL,
+            FantasyAlertSeverity.INFO,
+        ),
+        (
+            _status(game_day_state=GameDayState.INACTIVE),
+            FantasyAlertSeverity.CRITICAL,
+            FantasyAlertSeverity.INFO,
+        ),
+        (
+            _status(official_inactive=True),
+            FantasyAlertSeverity.CRITICAL,
+            FantasyAlertSeverity.INFO,
+        ),
+        (
+            _status(injury_designation=InjuryDesignation.OUT),
+            FantasyAlertSeverity.CRITICAL,
+            FantasyAlertSeverity.INFO,
+        ),
+        (
+            _status(injury_designation=InjuryDesignation.DOUBTFUL),
+            FantasyAlertSeverity.WARNING,
+            FantasyAlertSeverity.INFO,
+        ),
+        (
+            _status(injury_designation=InjuryDesignation.QUESTIONABLE),
+            FantasyAlertSeverity.WARNING,
+            FantasyAlertSeverity.INFO,
+        ),
+        (
+            _status(game_day_state=GameDayState.UNKNOWN),
+            FantasyAlertSeverity.WARNING,
+            FantasyAlertSeverity.INFO,
+        ),
+        (
+            _status(roster_eligibility=RosterEligibility.UNKNOWN),
+            FantasyAlertSeverity.WARNING,
+            FantasyAlertSeverity.INFO,
+        ),
+        (
+            _status(injury_designation=InjuryDesignation.UNKNOWN),
+            FantasyAlertSeverity.WARNING,
+            FantasyAlertSeverity.INFO,
+        ),
+    ),
+)
+def test_abnormal_status_severity_depends_on_lineup_context(
+    status: NFLPlayerStatus,
+    starter_severity: FantasyAlertSeverity,
+    bench_severity: FantasyAlertSeverity,
+) -> None:
+    starter = _roster("starter").players[0]
+    bench = _roster("bench", is_starter=False).players[0]
+
+    assert determine_fantasy_severity(starter, status) is starter_severity
+    assert determine_fantasy_severity(bench, status) is bench_severity
+
+
+def test_missing_status_is_warning_for_starter_and_info_for_bench() -> None:
+    starter = _roster("starter").players[0]
+    bench = _roster("bench", is_starter=False).players[0]
+
+    assert (
+        determine_fantasy_severity(starter, None) is FantasyAlertSeverity.WARNING
+    )
+    assert determine_fantasy_severity(bench, None) is FantasyAlertSeverity.INFO

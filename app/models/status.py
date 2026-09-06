@@ -41,6 +41,15 @@ class Confidence(IntEnum):
     LOW = 1
 
 
+class FantasyAlertSeverity(str, Enum):
+    """League-specific urgency after an NFL status is mapped to a roster."""
+
+    CRITICAL = "critical"
+    WARNING = "warning"
+    INFO = "info"
+    NORMAL = "normal"
+
+
 @dataclass(frozen=True)
 class SourceResult:
     source: str

@@ -6,6 +6,7 @@ from app.models.opportunity import DepthOpportunity, OpportunityLevel
 from app.models.player import FantasyPlayer
 from app.models.status import (
     Confidence,
+    FantasyAlertSeverity,
     GameDayState,
     GameSourceReport,
     InjuryDesignation,
@@ -19,6 +20,7 @@ __all__ = [
     "Confidence",
     "DepthOpportunity",
     "FantasyLeague",
+    "FantasyAlertSeverity",
     "FantasyPlatform",
     "FantasyPlayer",
     "FantasyRoster",

@@ -24,6 +24,7 @@ from app.analysis.fantasy_status import (
     FantasyStatusMapping,
     FantasyStatusMappingError,
     LeaguePlayerStatus,
+    determine_fantasy_severity,
     map_nfl_statuses_to_fantasy_leagues,
 )
 from app.analysis.opportunity import (
@@ -56,6 +57,7 @@ __all__ = [
     "combine_official_statuses",
     "degrade_cached_confidence",
     "detect_depth_opportunities",
+    "determine_fantasy_severity",
     "map_nfl_statuses_to_fantasy_leagues",
     "render_player_statuses",
     "render_depth_opportunities",

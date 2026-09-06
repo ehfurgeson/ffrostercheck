@@ -6,7 +6,16 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Sequence
 
-from app.models import FantasyLeague, FantasyPlayer, FantasyRoster, NFLPlayerStatus
+from app.models import (
+    FantasyAlertSeverity,
+    FantasyLeague,
+    FantasyPlayer,
+    FantasyRoster,
+    GameDayState,
+    InjuryDesignation,
+    NFLPlayerStatus,
+    RosterEligibility,
+)
 
 
 class FantasyStatusMappingError(ValueError):
@@ -35,6 +44,7 @@ class LeaguePlayerStatus:
 
     player: FantasyPlayer
     status: NFLPlayerStatus | None
+    severity: FantasyAlertSeverity
 
     @property
     def is_mapped(self) -> bool:
@@ -70,6 +80,47 @@ class FantasyStatusMapping:
         return not self.issues
 
 
+def determine_fantasy_severity(
+    player: FantasyPlayer,
+    status: NFLPlayerStatus | None,
+) -> FantasyAlertSeverity:
+    """Apply the deterministic V1 urgency policy in one league's lineup context."""
+
+    if status is None:
+        return (
+            FantasyAlertSeverity.WARNING
+            if player.is_starter
+            else FantasyAlertSeverity.INFO
+        )
+
+    unavailable = (
+        status.roster_eligibility is RosterEligibility.INELIGIBLE
+        or status.game_day_state is GameDayState.INACTIVE
+        or status.official_inactive is True
+        or status.injury_designation is InjuryDesignation.OUT
+    )
+    risky_or_unknown = (
+        status.roster_eligibility is RosterEligibility.UNKNOWN
+        or status.game_day_state is GameDayState.UNKNOWN
+        or status.injury_designation
+        in {
+            InjuryDesignation.DOUBTFUL,
+            InjuryDesignation.QUESTIONABLE,
+            InjuryDesignation.UNKNOWN,
+        }
+    )
+    if player.is_starter:
+        if unavailable:
+            return FantasyAlertSeverity.CRITICAL
+        if risky_or_unknown:
+            return FantasyAlertSeverity.WARNING
+        return FantasyAlertSeverity.NORMAL
+
+    if unavailable or risky_or_unknown:
+        return FantasyAlertSeverity.INFO
+    return FantasyAlertSeverity.NORMAL
+
+
 def map_nfl_statuses_to_fantasy_leagues(
     rosters: Sequence[FantasyRoster],
     statuses: Sequence[NFLPlayerStatus],
@@ -95,7 +146,13 @@ def map_nfl_statuses_to_fantasy_leagues(
                 if player.canonical_player_id
                 else None
             )
-            mapped_players.append(LeaguePlayerStatus(player=player, status=status))
+            mapped_players.append(
+                LeaguePlayerStatus(
+                    player=player,
+                    status=status,
+                    severity=determine_fantasy_severity(player, status),
+                )
+            )
             if not player.canonical_player_id:
                 issues.append(
                     FantasyStatusIssue(
