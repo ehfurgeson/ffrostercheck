@@ -93,7 +93,11 @@ def join_owned_skill_players(
     *,
     identities: Sequence[CanonicalPlayer] = (),
 ) -> OwnedDepthJoinResult:
-    """Join owned players by GSIS, then known ESPN ID, never by name."""
+    """Join owned players by GSIS, then known ESPN ID, never by name.
+
+    When one ID maps to both a skill-role row and special-teams KR/PR rows, keep
+    the skill-role row so opportunity analysis can proceed.
+    """
 
     index = build_depth_chart_index(snapshot)
     identities_by_gsis = {identity.gsis_id: identity for identity in identities}
@@ -135,7 +139,7 @@ def join_owned_skill_players(
     matches: list[OwnedDepthMatch] = []
     for canonical_id, fantasy_instances in grouped.items():
         owned = tuple(fantasy_instances)
-        gsis_rows = index.by_gsis_id.get(canonical_id, ())
+        gsis_rows = _preferred_skill_join_rows(index.by_gsis_id.get(canonical_id, ()))
         if len(gsis_rows) == 1:
             matches.append(
                 OwnedDepthMatch(canonical_id, gsis_rows[0], DepthJoinMethod.GSIS_ID, owned)
@@ -146,7 +150,9 @@ def join_owned_skill_players(
             continue
 
         espn_id = _known_espn_id(canonical_id, owned, identities_by_gsis)
-        espn_rows = index.by_espn_id.get(espn_id, ()) if espn_id else ()
+        espn_rows = _preferred_skill_join_rows(
+            index.by_espn_id.get(espn_id, ()) if espn_id else ()
+        )
         if len(espn_rows) == 1:
             matches.append(
                 OwnedDepthMatch(canonical_id, espn_rows[0], DepthJoinMethod.ESPN_ID, owned)
@@ -214,6 +220,27 @@ def _known_espn_id(
         if player.platform.value == "espn" and player.platform_player_id
     }
     return next(iter(espn_ids)) if len(espn_ids) == 1 else None
+
+
+def _preferred_skill_join_rows(
+    rows: Sequence[DepthChartRow],
+) -> tuple[DepthChartRow, ...]:
+    """Prefer QB/RB/WR/TE rows when the same ID also appears on special teams.
+
+    Returners often share a GSIS/ESPN ID across an offensive skill slot and a KR/PR
+    row. Opportunity analysis only needs the skill-role chain, so discard non-skill
+    duplicates before treating the ID as ambiguous.
+    """
+
+    candidates = tuple(rows)
+    if len(candidates) <= 1:
+        return candidates
+    skill_rows = tuple(
+        row
+        for row in candidates
+        if normalize_position(row.position) in SKILL_POSITIONS
+    )
+    return skill_rows if skill_rows else candidates
 
 
 def _ambiguous_issue(

@@ -46,6 +46,10 @@ def _row(
     gsis_id: str | None = "00-001",
     espn_id: str | None = "1001",
     name: str = "Owned Player",
+    formation: str = "Offense",
+    position: str = "RB",
+    position_slot: int = 1,
+    source_rank: int = 1,
 ) -> DepthChartRow:
     return DepthChartRow(
         snapshot_at=SNAPSHOT_AT,
@@ -53,10 +57,10 @@ def _row(
         player_name=name,
         espn_id=espn_id,
         gsis_id=gsis_id,
-        formation="Offense",
-        position="RB",
-        position_slot=1,
-        source_rank=1,
+        formation=formation,
+        position=position,
+        position_slot=position_slot,
+        source_rank=source_rank,
     )
 
 
@@ -175,6 +179,64 @@ def test_duplicate_provider_id_is_ambiguous_instead_of_guessed() -> None:
     assert result.matches == ()
     assert result.issues[0].state is DepthJoinIssueState.AMBIGUOUS_DEPTH_ID
     assert "multiple depth rows" in (result.issues[0].detail or "")
+
+
+def test_special_teams_duplicate_prefers_skill_position_row() -> None:
+    player = _player(player_id="sleeper-1", canonical_id="00-001")
+    offense = _row(
+        name="Owned Player",
+        formation="3WR 1TE",
+        position="RB",
+        position_slot=11,
+        source_rank=1,
+    )
+    returner = _row(
+        name="Owned Player",
+        formation="Special Teams",
+        position="PR",
+        position_slot=4,
+        source_rank=2,
+    )
+
+    result = join_owned_skill_players((player,), _snapshot(returner, offense))
+
+    assert len(result.matches) == 1
+    assert result.matches[0].depth_row is offense
+    assert result.matches[0].method is DepthJoinMethod.GSIS_ID
+    assert result.issues == ()
+
+
+def test_multiple_skill_rows_for_same_id_remain_ambiguous() -> None:
+    player = _player(player_id="sleeper-1", canonical_id="00-001", position="WR")
+    slot_one = _row(
+        name="Owned Player",
+        formation="3WR 1TE",
+        position="WR",
+        position_slot=1,
+        source_rank=1,
+    )
+    slot_two = _row(
+        name="Owned Player",
+        formation="2WR 2TE",
+        position="WR",
+        position_slot=2,
+        source_rank=1,
+    )
+    returner = _row(
+        name="Owned Player",
+        formation="Special Teams",
+        position="KR",
+        position_slot=5,
+        source_rank=1,
+    )
+
+    result = join_owned_skill_players(
+        (player,),
+        _snapshot(slot_one, returner, slot_two),
+    )
+
+    assert result.matches == ()
+    assert result.issues[0].state is DepthJoinIssueState.AMBIGUOUS_DEPTH_ID
 
 
 def test_empty_or_stale_snapshot_remains_non_blocking_join_input() -> None:
