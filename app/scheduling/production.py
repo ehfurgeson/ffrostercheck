@@ -58,7 +58,7 @@ def run_production_game_day(
     config = load_config(config_path)
     environment = load_environment(env_file=env_file)
     start = (started_at or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    initial = _load_operational_snapshot(config, environment, decision_at=start)
+    initial = load_operational_snapshot(config, environment, decision_at=start)
     plan = build_game_day_plan(
         initial.kickoff_plan,
         config.alerts,
@@ -93,7 +93,7 @@ def run_production_game_day(
 
     def final(job: PlannedJob, decision_at: datetime) -> None:
         season, week = week_for(job)
-        refreshed = _load_operational_snapshot(
+        refreshed = load_operational_snapshot(
             config,
             environment,
             decision_at=decision_at,
@@ -130,7 +130,7 @@ def run_production_game_day(
     )
 
 
-def _load_operational_snapshot(
+def load_operational_snapshot(
     config: AppConfig,
     environment: EnvironmentConfig,
     *,

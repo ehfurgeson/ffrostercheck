@@ -39,8 +39,9 @@ uv run fantasy-watchdog depth-charts --season 2026 --charts tests/fixtures/depth
 uv run fantasy-watchdog owned-depth --config config.yaml
 uv run fantasy-watchdog plan-game-day --config config.yaml
 uv run fantasy-watchdog run-game-day --config config.yaml
+uv run fantasy-watchdog health --config config.yaml
 ```
 
-Native deployment guides are available for [Linux, Windows, and macOS](deploy/README.md). Run `plan-game-day` first for a read-only production smoke test; `run-game-day` waits for live job times and can send configured email alerts.
+Native deployment guides are available for [Linux, Windows, and macOS](deploy/README.md). Run `plan-game-day` or `health` first for a read-only production smoke test; `run-game-day` waits for live job times and can send configured email alerts.
 
 Private ESPN leagues use `ESPN_SWID` and `ESPN_S2` from `.env`; credentials are never included in errors or diagnostic output. Official NFL.com diagnostics stay fixture-driven and never infer active or healthy from missing rows. Official team-site context is optional, non-blocking, and attributed only: Packers list adapters may name players, while Chiefs/Patriots/generic narrative is preserved as excerpt text and never converted into active/inactive/out. Sleeper catalog `active` is recorded as employment metadata only and is not a game-day active declaration. nflverse injuries are corroboration only; a missing or unsupported season is a source failure, not a healthy league. Confidence follows the strongest informing source and is reduced when cached official evidence is reused after a failed refresh.

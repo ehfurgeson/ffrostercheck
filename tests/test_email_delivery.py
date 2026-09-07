@@ -186,6 +186,22 @@ def test_rejects_non_positive_connection_timeout() -> None:
         SMTPEmailNotifier(_config(), _environment(), timeout_seconds=0)
 
 
+def test_verify_connection_authenticates_without_sending() -> None:
+    smtp = FakeSMTP("unused", 0, timeout=0)
+    notifier = SMTPEmailNotifier(
+        _config(),
+        _environment(),
+        smtp_factory=lambda host, port, *, timeout: _configure_connection(
+            smtp, host, port, timeout
+        ),
+    )
+
+    notifier.verify_connection()
+
+    assert smtp.calls == ["enter", "ehlo", "starttls", "ehlo", "login", "exit"]
+    assert "send_message" not in smtp.calls
+
+
 def _configure_connection(
     smtp: FakeSMTP,
     host: str,

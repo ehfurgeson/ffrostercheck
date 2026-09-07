@@ -23,7 +23,7 @@ def test_production_service_exits_cleanly_when_today_has_no_relevant_games(
         "app.scheduling.production.load_environment", lambda **_kwargs: object()
     )
     monkeypatch.setattr(
-        "app.scheduling.production._load_operational_snapshot",
+        "app.scheduling.production.load_operational_snapshot",
         lambda *_args, **_kwargs: OperationalSnapshot(
             lineup=object(),  # no jobs means execution state is intentionally unused
             kickoff_plan=KickoffPlan(windows=(), unmatched=()),

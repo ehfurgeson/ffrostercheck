@@ -65,6 +65,7 @@ from app.scheduling import (
     render_game_day_service,
     run_production_game_day,
 )
+from app.health import collect_health_report, render_health_report
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -285,6 +286,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Offline nflverse depth-chart JSON fixture",
     )
+    health = subparsers.add_parser(
+        "health",
+        description="Probe fantasy, NFL, depth, cache, SMTP, and next-job readiness",
+    )
+    health.add_argument("--config", type=Path, default=Path("config.yaml"))
+    health.add_argument("--env-file", type=Path, default=Path(".env"))
+    health.add_argument("--cache-dir", type=Path, default=Path("cache"))
     return parser
 
 
@@ -325,6 +333,8 @@ def main(argv: list[str] | None = None) -> int:
             return _depth_charts(args)
         if args.command == "owned-depth":
             return _owned_depth(args)
+        if args.command == "health":
+            return _health(args)
     except (
         ConfigError,
         SleeperAPIError,
@@ -851,6 +861,18 @@ def _load_sleeper_catalog(path: Path) -> dict:
     if not isinstance(payload, dict) or not all(isinstance(value, dict) for value in payload.values()):
         raise ConfigError(f"Sleeper player catalog fixture is invalid: {path}")
     return payload
+
+
+def _health(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    environment = load_environment(env_file=args.env_file)
+    report = collect_health_report(
+        config,
+        environment,
+        cache_dir=args.cache_dir,
+    )
+    print(render_health_report(report))
+    return 0 if report.ok else 1
 
 
 def _load_nflverse_injury_rows(path: Path) -> list:

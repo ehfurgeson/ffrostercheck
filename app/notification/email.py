@@ -52,6 +52,25 @@ class SMTPEmailNotifier:
         self._timeout_seconds = timeout_seconds
         self._smtp_factory = smtp_factory
 
+    def verify_connection(self) -> None:
+        """Authenticate over STARTTLS without sending mail."""
+
+        try:
+            with self._smtp_factory(
+                self._host,
+                self._port,
+                timeout=self._timeout_seconds,
+            ) as smtp:
+                smtp.ehlo()
+                smtp.starttls(context=ssl.create_default_context())
+                smtp.ehlo()
+                smtp.login(self._username, self._password)
+        except (OSError, smtplib.SMTPException) as exc:
+            raise EmailDeliveryError(
+                f"SMTP verification failed via {self._host}:{self._port}: "
+                f"{type(exc).__name__}"
+            ) from exc
+
     def send_game_alert(
         self,
         text_email: TextEmail,

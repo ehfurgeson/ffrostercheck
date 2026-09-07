@@ -21,10 +21,11 @@ Choose a time before the earliest configured T−95 job. This is especially impo
 
 ## Verify and operate
 
-Use the read-only planner before relying on automatic delivery:
+Use the read-only planner or health command before relying on automatic delivery:
 
 ```powershell
 .\.venv\Scripts\fantasy-watchdog.exe plan-game-day --config .\config.yaml --env-file .\.env
+.\.venv\Scripts\fantasy-watchdog.exe health --config .\config.yaml --env-file .\.env
 Get-ScheduledTask -TaskName "Fantasy Watchdog"
 Get-ScheduledTaskInfo -TaskName "Fantasy Watchdog"
 Start-ScheduledTask -TaskName "Fantasy Watchdog"

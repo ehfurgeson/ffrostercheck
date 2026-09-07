@@ -23,7 +23,12 @@ from app.scheduling.prefetch import (
     execute_prefetch_job,
     render_prefetch_execution,
 )
-from app.scheduling.production import ProductionServiceError, run_production_game_day
+from app.scheduling.production import (
+    OperationalSnapshot,
+    ProductionServiceError,
+    load_operational_snapshot,
+    run_production_game_day,
+)
 from app.scheduling.service import (
     GameDayServiceResult,
     ServiceJobResult,
@@ -37,6 +42,7 @@ __all__ = [
     "FinalExecution",
     "FinalExecutionError",
     "FinalLineupSnapshot",
+    "OperationalSnapshot",
     "PlannedJob",
     "PlannedJobKind",
     "PrefetchExecution",
@@ -49,6 +55,7 @@ __all__ = [
     "execute_final_job",
     "execute_official_final_job",
     "execute_prefetch_job",
+    "load_operational_snapshot",
     "render_game_day_plan",
     "render_game_day_service",
     "render_final_execution",
