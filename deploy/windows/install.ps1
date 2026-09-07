@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
+    [string]$ProjectRoot,
     [string]$TaskName = "Fantasy Watchdog",
     [ValidatePattern("^(?:[01]\d|2[0-3]):[0-5]\d$")]
     [string]$StartTime = "07:00"
@@ -8,6 +8,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# $PSScriptRoot is unreliable in param() defaults; resolve after binding.
+if (-not $ProjectRoot) {
+    $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+}
 $ProjectRoot = (Resolve-Path $ProjectRoot).Path
 $Executable = Join-Path $ProjectRoot ".venv\Scripts\fantasy-watchdog.exe"
 $ConfigPath = Join-Path $ProjectRoot "config.yaml"
