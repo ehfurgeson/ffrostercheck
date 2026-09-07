@@ -36,6 +36,12 @@ from app.notification import (
 )
 from app.scheduling.planner import PlannedJob, PlannedJobKind
 from app.storage import StatusCache, StatusCacheError, StatusResolution
+from app.structured_logging import (
+    emit,
+    get_logger,
+    player_status_fields,
+    source_report_fields,
+)
 
 
 class FinalExecutionError(ValueError):
@@ -187,7 +193,7 @@ def execute_final_job(
         lineup_refreshes=snapshot.refresh_evidence,
     )
     notifier.send_game_alert(text_email, html_email)
-    return FinalExecution(
+    execution = FinalExecution(
         job=job,
         decision_at=decision_at,
         lineup_snapshot=snapshot,
@@ -196,6 +202,43 @@ def execute_final_job(
         html_email=html_email,
         source_reports=tuple(reports),
     )
+    logger = get_logger("scheduling.final")
+    for resolution in execution.status_resolutions:
+        emit(
+            "final.status",
+            logger=logger,
+            job_id=job.job_id,
+            game_id=resolution.game_id,
+            freshness=resolution.freshness.value,
+            used_cache=resolution.used_cache,
+            origin_fresh=resolution.origin_fresh,
+            refresh_attempted=resolution.refresh_attempted,
+            cache_age_seconds=resolution.cache_age_seconds,
+            reports=[source_report_fields(report) for report in resolution.reports],
+            player_statuses=[
+                player_status_fields(status) for status in resolution.statuses
+            ],
+            success=True,
+        )
+    depth_snapshot_at = None
+    if snapshot.depth_relations is not None:
+        depth_snapshot_at = snapshot.depth_relations.snapshot.snapshot_at
+    emit(
+        "final.email_sent",
+        logger=logger,
+        job_id=job.job_id,
+        kickoff=job.kickoff,
+        decision_at=decision_at,
+        leagues=len(mapping.leagues),
+        replacements=len(replacement_options),
+        opportunities=len(opportunities),
+        used_cache=execution.used_cache,
+        depth_chart_snapshot_at=depth_snapshot_at,
+        subject=text_email.subject,
+        success=True,
+        notification_sent=True,
+    )
+    return execution
 
 
 def execute_official_final_job(

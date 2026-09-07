@@ -1,14 +1,58 @@
-# Fantasy Watchdog
+# Fantasy Football Roster Check
 
-Fantasy Watchdog is a Python service that will check fantasy-football lineups shortly before NFL kickoff and email one consolidated availability report across Sleeper and ESPN leagues.
+This is a fantasy watchdog Python service that watches fantasy-football lineups across Sleeper and ESPN leagues and emails one consolidated availability report about five minutes before each relevant NFL kickoff.
 
+It answers a narrow operational question:
 
-## Requirements
+> Before these games start, are any of my starters inactive, out, or risky—and if so, what usable bench options do I still have in each league?
 
-- Python 3.10 or newer (Python 3.12 is the tested development version)
-- [`uv`](https://docs.astral.sh/uv/) or another Python package manager
+## Why it exists
 
-## Development setup
+On NFL Sundays it is easy to miss an inactive list while juggling multiple fantasy apps. This service gathers official status once per real NFL player, maps the result back to every fantasy league that owns that player, and sends a single email per kickoff window.
+
+## How it works
+
+```text
+Fantasy platforms (Sleeper + ESPN)
+        │
+        ▼
+Normalize rosters → resolve NFL identities → group by exact kickoff
+        │
+        ├─ T−90-ish: silently prefetch official inactives / injuries
+        │
+        └─ T−5: refresh lineups, re-check status, analyze, email
+```
+
+1. **Ingest fantasy state** from configured Sleeper leagues and an authenticated ESPN league.
+2. **Resolve players once** to canonical NFL identities (preferring stable provider IDs over names).
+3. **Plan the day** from the NFL schedule so 1:00, 4:05, and 4:25 windows stay separate.
+4. **Prefetch official status** well before kickoff and cache complete reports.
+5. **At T−5**, refresh lineups, refresh official sources, fall back carefully if needed, then send one plain-text + HTML email with league-specific alerts and bench replacements.
+
+Missing or incomplete official data is never treated as “healthy.” Report completeness, confidence, and source freshness are explicit in the output.
+
+## Design highlights
+
+| Area | Approach |
+|---|---|
+| Source of truth | Official NFL.com inactives and weekly injury reports first; Sleeper / nflverse / team sites are corroboration or fallback |
+| Deduplication | One NFL status lookup per real player, reused across every fantasy league that owns them |
+| Confidence | Strongest informing source wins; cached official data after a failed refresh is downgraded |
+| Replacements | Deterministic: eligible slot, verified availability, unlocked kickoff, optional depth-chart promotion boost |
+| Failure mode | Partial source failure still produces an email that discloses what could not be verified |
+| Secrets | ESPN cookies and SMTP credentials live only in `.env`; logs redact credential-like fields |
+
+## Stack
+
+- **Python 3.10+** (developed and tested on 3.12)
+- **httpx** for fantasy and NFL HTTP clients
+- **BeautifulSoup** for official NFL.com HTML parsing
+- **nflreadpy / nflverse** for schedules, identity crosswalks, rosters, and depth charts
+- **SMTP + STARTTLS** for multipart email delivery
+- **uv** for environment and dependency management
+- Native host schedulers: **systemd**, **Windows Task Scheduler**, or **macOS LaunchAgent**
+
+## Quick start
 
 ```bash
 uv venv --python 3.12
@@ -18,30 +62,70 @@ cp .env.example .env
 uv run pytest
 ```
 
-`config.yaml` contains ordinary application settings and may be customized locally. Authenticated ESPN and SMTP credentials belong only in `.env`, which is ignored by Git; SMTP delivery uses authenticated STARTTLS and sends the plain-text and HTML renderings as one multipart message.
+Edit `config.yaml` for season, leagues, timezone, and alert offsets. Put authenticated values only in `.env`:
 
-## Current milestone
-
-The project currently loads Sleeper and ESPN rosters, resolves canonical NFL identities, groups players by exact kickoff, parses official NFL.com inactives and injury reports, combines those sources into one status per player, caches T−90 official snapshots, and uses Sleeper catalog fields plus nflverse injuries as fallbacks. It selects one timestamped depth snapshot, joins deduplicated owned QB/RB/WR/TE players by exact GSIS ID and then known ESPN ID, builds normalized same-slot blocker chains, and detects direct promotions, role boosts, and weaker same-position opportunity. Unknown and fallback-only blockers remain ahead, so only explicit official inactive or Out evidence changes the effective depth order. League-specific analysis assigns deterministic severity and ranks only eligible, verified bench replacements whose games have not locked; a missing kickoff is never assumed actionable. Plain-text and HTML emails are rendered per exact kickoff window, grouped by urgency and league with healthy bench noise omitted and missing status labeled explicitly, then delivered together through authenticated SMTP with STARTTLS. Delivery requires both SMTP secrets, treats recipient refusal as failure, and sanitizes transport errors so credentials and server response details are not exposed. The game-day planner turns relevant local-date kickoff windows into deterministic prefetch and final jobs; the silent prefetch executor retries incomplete official reports, and the final executor refreshes and re-resolves fantasy lineups, attempts official status refreshes, consults fallbacks for roster eligibility and degraded official evidence, performs league-specific analysis, and sends one consolidated T−5 alert. The `run-game-day` command now composes those live stages into one supervised process, and the checked-in systemd service/timer starts it each morning without hard-coding NFL weekdays. Final emails disclose fantasy-provider retrieval times and HTTP cache ages, while failed official refreshes may reuse the T−90 snapshot only with downgraded confidence and an explicit limitation. Optional official team-site articles can attach attributed notes, but they never override official inactives or become binary game-day status. Confidence is scored from the strongest informing source rather than averaged: official evidence is `official`, cached official evidence after a failed refresh is `high`, Sleeper is `medium`, and nflverse is `low`.
-
-```bash
-uv run fantasy-watchdog sleeper-rosters --config config.yaml
-uv run fantasy-watchdog espn-roster --config config.yaml
-uv run fantasy-watchdog all-rosters --config config.yaml
-uv run fantasy-watchdog nfl-inactives --html tests/fixtures/nfl_inactives/week18_excerpt.html --home JAX --away TEN
-uv run fantasy-watchdog nfl-injuries --season 2025 --week 18 --html tests/fixtures/nfl_injuries/week18_excerpt.html --home TB --away CAR
-uv run fantasy-watchdog player-status --season 2025 --week 18 --home JAX --away TEN --inactives-html tests/fixtures/nfl_inactives/week18_excerpt.html --injuries-html tests/fixtures/nfl_injuries/week18_excerpt.html --sleeper-players tests/fixtures/sleeper/status_players.json --nflverse-injuries tests/fixtures/nflverse/injuries.json
-uv run fantasy-watchdog status-cache --stage prefetch --season 2025 --week 18 --home JAX --away TEN --game-id 2025_18_JAX_TEN --inactives-html tests/fixtures/nfl_inactives/week18_excerpt.html --injuries-html tests/fixtures/nfl_injuries/week18_excerpt.html --cache-dir cache
-uv run fantasy-watchdog sleeper-status --home JAX --away TEN --players tests/fixtures/sleeper/status_players.json
-uv run fantasy-watchdog nflverse-status --season 2025 --week 18 --home JAX --away TEN --injuries tests/fixtures/nflverse/injuries.json
-uv run fantasy-watchdog team-status --home CHI --away GB --article GB=tests/fixtures/team_sites/packers_lists.html
-uv run fantasy-watchdog depth-charts --season 2026 --charts tests/fixtures/depth_charts/snapshots.json --as-of 2026-09-04T18:00:00Z
-uv run fantasy-watchdog owned-depth --config config.yaml
-uv run fantasy-watchdog plan-game-day --config config.yaml
-uv run fantasy-watchdog run-game-day --config config.yaml
-uv run fantasy-watchdog health --config config.yaml
+```env
+SLEEPER_USER=...
+ESPN_LEAGUE_ID=...
+ESPN_SWID=...
+ESPN_S2=...
+SMTP_USER=...
+SMTP_APP_PASSWORD=...
 ```
 
-Native deployment guides are available for [Linux, Windows, and macOS](deploy/README.md). Run `plan-game-day` or `health` first for a read-only production smoke test; `run-game-day` waits for live job times and can send configured email alerts.
+## Common commands
 
-Private ESPN leagues use `ESPN_SWID` and `ESPN_S2` from `.env`; credentials are never included in errors or diagnostic output. Official NFL.com diagnostics stay fixture-driven and never infer active or healthy from missing rows. Official team-site context is optional, non-blocking, and attributed only: Packers list adapters may name players, while Chiefs/Patriots/generic narrative is preserved as excerpt text and never converted into active/inactive/out. Sleeper catalog `active` is recorded as employment metadata only and is not a game-day active declaration. nflverse injuries are corroboration only; a missing or unsupported season is a source failure, not a healthy league. Confidence follows the strongest informing source and is reduced when cached official evidence is reused after a failed refresh.
+```bash
+# Read-only readiness checks
+uv run fantasy-watchdog health --config config.yaml
+uv run fantasy-watchdog plan-game-day --config config.yaml
+
+# Supervised game-day run (waits for planned jobs; can send email)
+uv run fantasy-watchdog run-game-day --config config.yaml
+
+# Useful diagnostics
+uv run fantasy-watchdog all-rosters --config config.yaml
+uv run fantasy-watchdog kickoff-windows --config config.yaml
+```
+
+`run-game-day` writes structured JSON events to stderr (job lifecycle, source reports, delivery) with sensitive keys redacted.
+
+## Deployment
+
+The same `run-game-day` entry point is used on every platform. A host scheduler starts it once each morning; the process plans that day’s relevant windows, waits, executes prefetch/final jobs, and exits.
+
+| Platform | Guide |
+|---|---|
+| Linux | [deploy/systemd](deploy/systemd/README.md) |
+| Windows | [deploy/windows](deploy/windows/README.md) |
+| macOS | [deploy/macos](deploy/macos/README.md) |
+
+See [deploy/README.md](deploy/README.md) for choosing a host. The machine must stay powered on (or wakeable) through the day’s kickoff windows.
+
+## Testing
+
+Parser and decision logic are covered by offline fixture tests so scrapers and precedence rules can be validated without live NFL pages:
+
+```bash
+uv run --extra test pytest
+```
+
+## Project layout
+
+```text
+app/
+  fantasy/          # Sleeper + ESPN adapters, shared manager
+  nfl/              # schedule, identity, depth charts, status sources
+  analysis/         # severity, eligibility, replacements, opportunity
+  notification/     # email rendering + SMTP transport
+  scheduling/       # planner, prefetch, final, production runner
+  storage/          # T−90 status cache
+  health.py         # operational probes
+  structured_logging.py
+tests/              # fixture-backed unit and integration coverage
+deploy/             # Linux / Windows / macOS installers
+```
+
+## Scope
+
+Fantasy Watchdog is a pre-kickoff safety system. It does not auto-set lineups, claim waivers, scrape sports-news sites broadly, or claim that a depth-chart promotion guarantees fantasy production.

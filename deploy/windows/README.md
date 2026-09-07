@@ -31,7 +31,7 @@ Get-ScheduledTaskInfo -TaskName "Fantasy Watchdog"
 Start-ScheduledTask -TaskName "Fantasy Watchdog"
 ```
 
-Task Scheduler's History tab and `Get-ScheduledTaskInfo` show launch and exit status. The current application prints its operational summary when the run ends; per-job structured logging is a separate planned milestone.
+Task Scheduler's History tab and `Get-ScheduledTaskInfo` show launch and exit status. `run-game-day` also writes one JSON log line per job and source event to stderr, with credentials redacted.
 
 The PC must remain powered on and capable of waking. A task delayed until after some planned checks will run only the remaining future jobs, and a fully shut-down computer cannot be awakened by Task Scheduler.
 

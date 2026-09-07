@@ -14,6 +14,12 @@ from app.nfl.sources.nfl_inactives import NFLInactivesSource
 from app.nfl.sources.nfl_injuries import NFLInjuryReportSource
 from app.scheduling.planner import PlannedJob, PlannedJobKind
 from app.storage.cache import CachedStatusSnapshot, StatusCache
+from app.structured_logging import (
+    emit,
+    get_logger,
+    player_status_fields,
+    source_report_fields,
+)
 
 
 REQUIRED_OFFICIAL_SOURCES = frozenset({"nfl_inactives", "nfl_injuries"})
@@ -75,6 +81,7 @@ def execute_prefetch_job(
     executed_at = executed_at.astimezone(timezone.utc)
 
     results: list[PrefetchGameResult] = []
+    logger = get_logger("scheduling.prefetch")
     for game in job.games:
         cached = cache.load_latest(game.game_id)
         if cached is not None and _reports_complete(cached.reports):
@@ -85,6 +92,16 @@ def execute_prefetch_job(
                     complete=True,
                     snapshot=cached,
                 )
+            )
+            emit(
+                "prefetch.game",
+                logger=logger,
+                job_id=job.job_id,
+                game_id=game.game_id,
+                attempted=False,
+                complete=True,
+                success=True,
+                reports=[source_report_fields(report) for report in cached.reports],
             )
             continue
 
@@ -103,13 +120,27 @@ def execute_prefetch_job(
                 statuses=statuses,
                 cached_at=executed_at,
             )
+            complete = _reports_complete(reports)
             results.append(
                 PrefetchGameResult(
                     game=game,
                     attempted=True,
-                    complete=_reports_complete(reports),
+                    complete=complete,
                     snapshot=snapshot,
                 )
+            )
+            emit(
+                "prefetch.game",
+                logger=logger,
+                job_id=job.job_id,
+                game_id=game.game_id,
+                attempted=True,
+                complete=complete,
+                success=True,
+                reports=[source_report_fields(report) for report in reports],
+                player_statuses=[
+                    player_status_fields(status) for status in statuses
+                ],
             )
         except Exception as exc:  # one source/game must not prevent other games from caching
             results.append(
@@ -120,12 +151,34 @@ def execute_prefetch_job(
                     error=f"{type(exc).__name__}: {exc}",
                 )
             )
+            emit(
+                "prefetch.game",
+                logger=logger,
+                job_id=job.job_id,
+                game_id=game.game_id,
+                attempted=True,
+                complete=False,
+                success=False,
+                exception_type=type(exc).__name__,
+                error=str(exc),
+            )
 
-    return PrefetchExecution(
+    execution = PrefetchExecution(
         job=job,
         executed_at=executed_at,
         game_results=tuple(results),
     )
+    emit(
+        "prefetch.finished",
+        logger=logger,
+        job_id=job.job_id,
+        games=len(execution.game_results),
+        complete=execution.complete,
+        needs_retry=execution.needs_retry,
+        success=execution.complete,
+        notification_sent=False,
+    )
+    return execution
 
 
 def execute_official_prefetch_job(

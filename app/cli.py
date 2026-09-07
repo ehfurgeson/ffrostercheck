@@ -467,6 +467,9 @@ def _plan_game_day(args: argparse.Namespace) -> int:
 
 
 def _run_game_day(args: argparse.Namespace) -> int:
+    from app.structured_logging import configure_structured_logging
+
+    configure_structured_logging()
     result = run_production_game_day(
         config_path=args.config,
         env_file=args.env_file,
